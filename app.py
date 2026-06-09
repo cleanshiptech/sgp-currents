@@ -18,12 +18,6 @@ TILES={"Carto Positron":("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y
 
 @st.cache_data(show_spinner=False, ttl=3600)   # re-check repo hourly for fresh CI data
 def get_precomputed(area,day,remote): return D.load_precomputed(area,day,remote_base=remote)
-@st.cache_data(show_spinner="Fetching + digitising frames…")
-def get_live(area,day):
-    try:
-        return D.build_live(area,day)
-    except Exception as e:
-        st.session_state["live_error"]=str(e); return None
 
 def nearest_station(lat,lon):
     best=None
@@ -34,8 +28,7 @@ def nearest_station(lat,lon):
 
 with st.sidebar:
     st.header("Data")
-    area=st.selectbox("Area",["SSP","EBA","SSP + EBA"])
-    sel_areas=["SSP","EBA"] if "+" in area else [area]
+    area="SSP + EBA"; sel_areas=["SSP","EBA"]   # combined view only
     sgt_today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
     date=st.date_input("Date",sgt_today); day=date.strftime("%Y%m%d")
     remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
@@ -47,14 +40,9 @@ with st.sidebar:
     loaded=[]                                  # [(area_name, day_data), ...]
     for a in sel_areas:
         dd=get_precomputed(a,day,remote)
-        if not dd and len(sel_areas)==1:       # live fallback only for a single area
-            st.info("No precomputed data for this date.")
-            if st.button(f"Build live: {a} {day}"):
-                dd=get_live(a,day)
-                if not dd: st.error(f"Live build failed: {st.session_state.get('live_error','no frames for this date (future or unavailable).')}")
         if dd and dd.get("frames"): loaded.append((a,dd))
     if loaded: st.caption("source: precomputed · "+" · ".join(f"{a} {len(dd['frames'])}/48" for a,dd in loaded))
-    elif len(sel_areas)>1: st.info(f"No precomputed data for {day} in either area.")
+    else: st.info(f"No precomputed data for {day} yet (CI builds today + yesterday nightly).")
     if st.button("↻ Reload latest data"): get_precomputed.clear(); st.rerun()
     st.markdown("---")
     basemap=st.selectbox("Basemap",list(TILES))
