@@ -60,6 +60,7 @@ if not day_data or not day_data["frames"]:
     st.title("MPA Current Time-Series")
     st.info("Choose area/date. If not precomputed, click **Build live** in the sidebar."); st.stop()
 frames=day_data["frames"]; sw=day_data["bounds"]["sw"]; ne=day_data["bounds"]["ne"]; times=sorted(frames)
+daymax=max((len(v) for v in frames.values()),default=0)   # peak-flow frame, for slack detection
 
 hcol,bcol=st.columns([5,1])
 hcol.subheader(f"{area} · {date:%d %b %Y}")
@@ -70,6 +71,8 @@ left,right=st.columns([3,2])
 with left:
     if view=="Snapshot (time)":
         ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.frame_overlay(frames[ti]); cap=f"{area} {day} {ti} · {len(frames[ti])} arrows"
+        if daymax and len(frames[ti])<0.25*daymax:
+            st.info("⚓ **Slack water** — currents are near zero (≤0.5 kn, drawn white and below the readable threshold), so the map is sparse by design. Slide to a flood/ebb time for the working-current picture.")
     else:
         stat="max" if "max" in view else "mean"; overlay=R.aggregate_overlay(frames,stat); cap=f"{area} {day} · {stat} over day"
     url,attr=TILES[basemap]
