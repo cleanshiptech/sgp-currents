@@ -30,20 +30,19 @@ with st.sidebar:
     st.header("Data")
     area="SSP + EBA"; sel_areas=["SSP","EBA"]   # combined view only
     sgt_today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
-    date=st.date_input("Date",sgt_today); day=date.strftime("%Y%m%d")
-    remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
-    remote=st.text_input("Precomputed data base URL (optional)",remote)
-    xlsx=st.text_input("MPA spreadsheet (optional)","MPA_TidalCurrent_2026_Jan-Jun_compressed.xlsx")
-    missing_cal=[a for a in sel_areas if a not in ex.GEOREF]
-    if missing_cal:
-        st.warning(f"{', '.join(missing_cal)} needs georeference calibration — upload one frame to add it."); st.stop()
-    loaded=[]                                  # [(area_name, day_data), ...]
-    for a in sel_areas:
-        dd=get_precomputed(a,day,remote)
-        if dd and dd.get("frames"): loaded.append((a,dd))
-    if loaded: st.caption("source: precomputed · "+" · ".join(f"{a} {len(dd['frames'])}/48" for a,dd in loaded))
-    else: st.info(f"No precomputed data for {day} yet (CI builds today + yesterday nightly).")
-    if st.button("↻ Reload latest data"): get_precomputed.clear(); st.rerun()
+    date=st.date_input("Date",sgt_today,
+                       min_value=sgt_today-dt.timedelta(days=40),
+                       max_value=sgt_today+dt.timedelta(days=62))
+    day=date.strftime("%Y%m%d")
+    remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""    # config, not UI
+    xlsx=st.secrets.get("MPA_XLSX","") if hasattr(st,"secrets") else ""
+    loaded=[(a,dd) for a in sel_areas if (dd:=get_precomputed(a,day,remote)) and dd.get("frames")]
+    if loaded:
+        st.caption(f"✓ {date:%a %d %b %Y} · SSP + EBA")
+    else:
+        st.warning(f"No data for **{date:%d %b %Y}** yet. The archive covers the current month "
+                   f"(it updates automatically) — try a date in {sgt_today:%B}.")
+    if st.button("↻ Refresh"): get_precomputed.clear(); st.rerun()
     st.markdown("---")
     basemap=st.selectbox("Basemap",list(TILES))
     view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
@@ -51,7 +50,8 @@ with st.sidebar:
 
 if not loaded:
     st.title("MPA Current Time-Series")
-    st.info("Choose area/date. If not precomputed, click **Build live** in the sidebar."); st.stop()
+    st.info(f"No archived data for {date:%d %b %Y}. Pick a date in the current month — the "
+            "archive fills automatically and extends into next month once MPA publishes it."); st.stop()
 
 # combined bounds + union of frame times across the selected area(s)
 allsw=[dd["bounds"]["sw"] for _,dd in loaded]; allne=[dd["bounds"]["ne"] for _,dd in loaded]

@@ -7,16 +7,19 @@ current-vector frames. Speed is shown as a **6-band filled grid**; direction as 
 ## Architecture (no disk cache — built for Streamlit Community Cloud)
 - **Runtime cache:** `st.cache_data` (in-memory), shared across users while warm. No disk writes.
 - **Persistence = GitHub repo as read-only database, written by CI (not the app):**
-  the Action `.github/workflows/refresh-data.yml` runs `build_data.py` on a schedule,
-  digitises each day, and commits compact JSON to a **separate `data` branch**.
-  The app reads it via a raw URL (`DATA_BASE` secret), so the code repo is never touched
-  and there's no redeploy loop.
-- **Fallback:** if a date isn't precomputed, the app live-fetches it into the in-memory
-  cache (works online; just not persisted).
+  the Action `.github/workflows/refresh-data.yml` runs nightly, digitises every day of the
+  **current month** (and **next month** automatically, once MPA — which is a tidal
+  *forecast* — publishes it), and commits compact JSON to a **separate `data` branch**.
+  It is incremental (skips days already built); pass `force: true` on a manual run to
+  rebuild the whole window after an extractor change. The app reads the branch via a raw
+  URL (`DATA_BASE` secret), so the code repo is never touched and there's no redeploy loop.
+- The app is **read-only**: it never writes data (Streamlit Cloud has no disk and no repo
+  credentials). Dates outside the archived window simply show a "not archived yet" note.
 
 Set in Streamlit secrets:
 ```
 DATA_BASE = "https://raw.githubusercontent.com/cleanshiptech/sgp-currents/data/data"
+# MPA_XLSX = "..."   # optional: path to the MPA spreadsheet for the exact-value overlay
 ```
 
 ## Run
@@ -24,9 +27,9 @@ DATA_BASE = "https://raw.githubusercontent.com/cleanshiptech/sgp-currents/data/d
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Pick area + date. If precomputed data exists it loads instantly; otherwise click
-**Build live**. Choose a basemap (Esri Ocean / Carto), a map layer (snapshot at a time,
-or per-cell max/mean over the day), then **click the map** to drop a worksite.
+Pick a date in the current month (it loads instantly from the archive). Choose a basemap,
+a map layer (snapshot at a time, or per-cell max/mean over the day), then **click the map**
+to drop a worksite.
 
 ## CI data builder (run locally or by the Action)
 ```
