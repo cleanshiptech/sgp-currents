@@ -1,0 +1,42 @@
+name: refresh-tidal-data
+on:
+  schedule: [{cron: "30 18 * * *"}]   # daily ~02:30 SGT
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4            # code lives on the default branch
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pillow numpy scipy requests
+      - name: Build today + yesterday (SGT)
+        run: |
+          python - <<'PY'
+          import datetime, subprocess
+          sgt = datetime.datetime.utcnow()+datetime.timedelta(hours=8)
+          days=[(sgt-datetime.timedelta(days=k)).strftime("%Y%m%d") for k in (0,1)]
+          args=[]
+          for area in ["SSP","EBA"]:
+              for d in days: args+=[area,d]
+          subprocess.check_call(["python","build_data.py",*args])
+          PY
+      - name: Publish JSON to the 'data' branch
+        run: |
+          git config user.name "tidal-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git fetch origin data || true
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git worktree add ../pub data
+          else
+            git worktree add -b data ../pub
+            (cd ../pub && git rm -rfq . || true)
+          fi
+          mkdir -p ../pub/data
+          cp data/*.json ../pub/data/
+          cd ../pub
+          git add -f data/*.json
+          git commit -m "data refresh $(date -u +%F)" || { echo "no changes"; exit 0; }
+          git push origin data

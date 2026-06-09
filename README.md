@@ -1,0 +1,60 @@
+# MPA Current Time-Series (online)
+
+Pick a point on a map → get the tidal current **through the day** (speed time-series,
+set-direction, max / mean / %-over-limit), digitised from the MPA Digital Tidal Atlas
+current-vector frames. Speed is shown as a **6-band filled grid**; direction as arrows.
+
+## Architecture (no disk cache — built for Streamlit Community Cloud)
+- **Runtime cache:** `st.cache_data` (in-memory), shared across users while warm. No disk writes.
+- **Persistence = GitHub repo as read-only database, written by CI (not the app):**
+  the Action `.github/workflows/refresh-data.yml` runs `build_data.py` on a schedule,
+  digitises each day, and commits compact JSON to a **separate `data` branch**.
+  The app reads it via a raw URL (`DATA_BASE` secret), so the code repo is never touched
+  and there's no redeploy loop.
+- **Fallback:** if a date isn't precomputed, the app live-fetches it into the in-memory
+  cache (works online; just not persisted).
+
+Set in Streamlit secrets:
+```
+DATA_BASE = "https://raw.githubusercontent.com/cleanshiptech/sgp-currents/data/data"
+```
+
+## Run
+```
+pip install -r requirements.txt
+streamlit run app.py
+```
+Pick area + date. If precomputed data exists it loads instantly; otherwise click
+**Build live**. Choose a basemap (Esri Ocean / Carto), a map layer (snapshot at a time,
+or per-cell max/mean over the day), then **click the map** to drop a worksite.
+
+## CI data builder (run locally or by the Action)
+```
+python build_data.py SSP 20260615 SSP 20260616
+```
+Writes `data/SSP_20260615.json`. The workflow commits these to the `data` branch daily.
+
+## Representation
+- **Speed → 6-band filled grid** (dark-green→dark-red), bands = the native 0.5-kn source bins (no false precision).
+- **Direction → anti-aliased icon darts** (white halo, supersampled), fixed size — direction only.
+- Time-series uses the same band scale as background, with the ROV limit (1.3 kn) as a dashed reference.
+
+## Files
+`extractor.py` GIF/array→arrows · `render.py` grid+arrow overlays, aggregate, series ·
+`fetch.py` MPA frame fetch · `data.py` precomputed/live loading · `build_data.py` CI writer ·
+`app.py` Streamlit UI.
+
+## Caveats
+- Speed binned to 0.5 kn; the series shows the bin midpoint ±0.25 kn. Exact per-station
+  numbers stay in the spreadsheet (overlaid as a dashed line near known stations).
+- Arrows under MPA's drawn station markers read poorly; merged fast-channel arrows are
+  under-recovered (anchorages are clean).
+- Both **SSP** and **EBA** are calibrated and validated (direction error 1–8° at known stations).
+  already has a slot for it.
+
+## Adding EBA
+```python
+import extractor as ex, numpy as np; from PIL import Image
+rows,cols = ex.detect_graticule(np.asarray(Image.open("TA_EBA....gif").convert("RGB")))
+# map rows->printed lat labels, cols->printed lon labels; add GEOREF["EBA"]; uncomment EBA in the workflow
+```

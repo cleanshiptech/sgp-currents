@@ -1,0 +1,10 @@
+streamlit>=1.33
+streamlit-folium>=0.20
+folium>=0.15
+altair>=5.0
+pandas>=2.0
+pillow>=10
+numpy>=1.24
+scipy>=1.10
+requests>=2.31
+openpyxl>=3.1
