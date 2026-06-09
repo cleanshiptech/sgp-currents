@@ -70,7 +70,7 @@ if "pt" in st.session_state and bcol.button("Clear pin"): del st.session_state["
 left,right=st.columns([3,2])
 with left:
     if view=="Snapshot (time)":
-        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.frame_overlay(frames[ti]); cap=f"{area} {day} {ti} · {len(frames[ti])} arrows"
+        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.gridded_frame_overlay(frames,ti); cap=f"{area} {day} {ti} · {len(frames[ti])} arrows"
         if daymax and len(frames[ti])<0.25*daymax:
             st.info("⚓ **Slack water** — currents are near zero (≤0.5 kn, drawn white and below the readable threshold), so the map is sparse by design. Slide to a flood/ebb time for the working-current picture.")
     else:
@@ -82,8 +82,9 @@ with left:
     st.caption(cap)
     ev=st_folium(m,height=470,use_container_width=True,returned_objects=["last_clicked"])
     if ev and ev.get("last_clicked"): st.session_state["pt"]=[ev["last_clicked"]["lat"],ev["last_clicked"]["lng"]]
-    # 6-band legend
-    chips="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};padding:2px 8px;margin:2px;color:#fff;border-radius:3px'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
+    # 6-band legend (dark text on light swatches, light on dark — stays readable for white "calm")
+    def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
+    chips="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};padding:2px 8px;margin:2px;color:{_txt(ex.DISPLAY_BANDS[i][1])};border:1px solid #cbd2d9;border-radius:3px'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
     st.markdown("**Speed (kn):** "+chips,unsafe_allow_html=True)
 
 with right:

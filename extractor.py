@@ -6,15 +6,21 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+# NB: (0,64,128) dark blue (2.0-2.5 kn) is deliberately excluded — on the MPA chart it is
+# indistinguishable from printed depth soundings (thousands of them), so every "detection"
+# is a false positive (verified: 0 genuine arrows even at peak ebb). Keeping it only painted
+# fake red "danger" cells. Max reliably-read band is therefore 1.5-2.0 kn (orange).
 LEGEND=[((255,255,255),0.25),((255,255,0),0.75),((128,255,0),1.25),((255,128,0),1.75),
-        ((0,64,128),2.25),((255,0,0),2.75),((128,64,64),3.25),((128,0,0),3.75),((64,0,0),4.25)]
+        ((255,0,0),2.75),((128,64,64),3.25),((128,0,0),3.75),((64,0,0),4.25)]
 FILL=[c for c,_ in LEGEND]; SPEED={c:s for c,s in LEGEND}
 def bin_label(c): s=SPEED[c]; return f"{s-0.25:.1f}-{s+0.25:.1f} kn"
 
 # 6 display bands aligned 1:1 to native 0.5-kn bins: (upper_kn, RGB)
-DISPLAY_BANDS=[(0.5,(26,122,58)),(1.0,(124,196,107)),(1.5,(245,224,66)),
-               (2.0,(245,154,35)),(2.5,(226,59,39)),(99.0,(140,16,16))]
-DISPLAY_LABELS=["0–0.5","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
+# 0-0.5 is white = "calm" (near-zero / slack), so a white cell never conflicts with a
+# coloured one; the ramp then runs green -> yellow -> orange -> red with rising speed.
+DISPLAY_BANDS=[(0.5,(255,255,255)),(1.0,(60,170,90)),(1.5,(225,205,55)),
+               (2.0,(240,150,35)),(2.5,(226,59,39)),(99.0,(140,16,16))]
+DISPLAY_LABELS=["0–0.5 calm","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
 def band_color(speed):
     for up,c in DISPLAY_BANDS:
         if speed<up: return c

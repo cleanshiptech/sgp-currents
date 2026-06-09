@@ -49,10 +49,12 @@ Writes `data/SSP_20260615.json`. The workflow commits these to the `data` branch
   numbers stay in the spreadsheet (overlaid as a dashed line near known stations).
 - Arrows under MPA's drawn station markers read poorly; merged fast-channel arrows are
   under-recovered (anchorages are clean).
-- **Two speed bands are colour-blocked** and largely unrecoverable: the **0–0.5 kn** band
-  (white) shares the chart's sea-fill colour, and the **2.0–2.5 kn** band (dark blue
-  `0,64,128`) collides with the chart's printed depth soundings. Coverage is strongest in
-  the **0.5–2.0 kn** range (the operationally relevant band vs the 1.3 kn ROV limit).
+- **Colour-blocked bands.** The **0–0.5 kn** band (white) shares the chart's sea-fill, so
+  near-zero/slack cells can't be read individually — they're shown as a faint "calm"
+  scaffold instead. The **2.0–2.5 kn** band (dark blue `0,64,128`) is *excluded*: it's
+  indistinguishable from printed depth soundings (0 genuine arrows even at peak ebb), so
+  reading it only produced false high-current cells. Reliable range is **0.5–2.0 kn** —
+  which brackets the 1.3 kn ROV limit, the operationally relevant threshold.
 - Extraction uses an elongation shape-gate (`extractor._elong`) so short slow-current
   arrows are recovered (~430/frame) without admitting round chart-text specks.
 - Both **SSP** and **EBA** are calibrated and validated (direction error 1–8° at known

@@ -6,29 +6,49 @@ from PIL import Image, ImageDraw
 import extractor as ex
 
 W,H=1673,896; CELL=17; SS=3   # half-cell px; supersample factor for anti-aliasing
-DART=[(10,0),(-6,7),(-1,0),(-6,-7)]   # unit dart pointing +x (tip, wing, notch, wing)
+# arrow glyph pointing +x: triangular head + rectangular shaft (cleaner than a flat chevron)
+DART=[(10,0),(2,-6),(2,-2.4),(-9,-2.4),(-9,2.4),(2,2.4),(2,6)]
+CALM=(255,255,255,46)          # faint scaffold fill for near-zero-current (slack) cells
 
 def _rot(pts,ang,cx,cy,s):
     c,si=math.cos(ang),math.sin(ang)
     return [((cx+(x*c-y*si)*s), (cy+(x*si+y*c)*s)) for x,y in pts]
 
-def _overlay(items, cell_alpha=120, icon=(35,38,45)):
+def _overlay(items, cell_alpha=140, icon=(28,31,38)):
+    """items: (px,py,speed,deg). Cells with speed<0.5 render as a faint 'calm' scaffold
+    (no dart); faster cells get a band-coloured fill plus a haloed arrow."""
     big=Image.new("RGBA",(W*SS,H*SS),(0,0,0,0)); d=ImageDraw.Draw(big)
-    g=SS                                   # cell pass
-    for px,py,speed,deg in items:
-        c=ex.band_color(speed); x,y=px*SS,py*SS
-        d.rectangle([x-CELL*SS, y-CELL*SS, x+CELL*SS, y+CELL*SS], fill=c+(cell_alpha,))
-    for px,py,speed,deg in items:           # icon pass (on top)
+    cell=lambda x,y,f: d.rectangle([x-CELL*SS,y-CELL*SS,x+CELL*SS,y+CELL*SS],fill=f)
+    for px,py,speed,deg in items:                 # calm scaffold first
+        if speed<0.5: cell(px*SS,py*SS,CALM)
+    for px,py,speed,deg in items:                 # moving cells on top
+        if speed>=0.5: cell(px*SS,py*SS,ex.band_color(speed)+(cell_alpha,))
+    for px,py,speed,deg in items:                 # darts (moving only)
+        if speed<0.5: continue
         x,y=px*SS,py*SS
         ang=math.atan2(-math.cos(math.radians(deg)),math.sin(math.radians(deg)))  # heading in image coords
-        halo=_rot([(p[0]*1.45,p[1]*1.45) for p in DART],ang,x,y,SS)
-        dart=_rot(DART,ang,x,y,SS)
-        d.polygon(halo,fill=(255,255,255,235))
-        d.polygon(dart,fill=icon+(255,))
+        d.polygon(_rot([(p[0]*1.3,p[1]*1.3) for p in DART],ang,x,y,SS),fill=(255,255,255,235))
+        d.polygon(_rot(DART,ang,x,y,SS),fill=icon+(255,))
     return big.resize((W,H),Image.LANCZOS)
 
 def frame_overlay(arrows):
     return _overlay([(a["px"],a["py"],a["speed"],a["dir"]) for a in arrows])
+
+def gridded_frame_overlay(frames, ti, max_px=14):
+    """Snapshot overlay over the *full* canonical grid: coloured cell+dart where a current
+    is read at time ti, faint calm cell elsewhere — so the field is always visible even at
+    slack water (when most cells are near-zero/white and otherwise unrecoverable)."""
+    nodes=canonical_nodes(frames); cur=frames.get(ti,[])
+    if cur:
+        cx=np.array([a["px"] for a in cur]); cy=np.array([a["py"] for a in cur])
+    items=[]
+    for px,py,lat,lon in nodes:
+        if cur:
+            dd=(cx-px)**2+(cy-py)**2; j=int(dd.argmin())
+            if dd[j]<=max_px*max_px:
+                a=cur[j]; items.append((px,py,a["speed"],a["dir"])); continue
+        items.append((px,py,0.25,0.0))   # calm cell, no dart
+    return _overlay(items)
 
 def canonical_nodes(frames):
     dense=max(frames.values(),key=len)
