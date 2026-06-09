@@ -34,20 +34,22 @@ def _overlay(items, cell_alpha=140, icon=(28,31,38)):
 def frame_overlay(arrows):
     return _overlay([(a["px"],a["py"],a["speed"],a["dir"]) for a in arrows])
 
-def gridded_frame_overlay(frames, ti, max_px=14):
-    """Snapshot over the *full* canonical grid: coloured cell+dart where a current is read
-    at time ti, faint grey 'no reading' cell elsewhere — so the survey field is always
-    visible while blanks stay honestly unknown (not painted 'calm')."""
-    nodes=canonical_nodes(frames); cur=frames.get(ti,[])
+def gridded_frame_overlay(frames, ti, max_px=22):
+    """Snapshot: draw EVERY recovered arrow at time ti (coloured cell + dart), then add a
+    faint grey 'no reading' cell at any canonical-grid node with no arrow nearby — so the
+    survey extent is visible while blanks stay honestly unknown (not painted 'calm').
+    (Arrow positions jitter frame-to-frame, so we render the real arrows directly rather
+    than snapping them onto the canonical grid, which would drop the unmatched ones.)"""
+    cur=frames.get(ti,[])
+    items=[(a["px"],a["py"],a["speed"],a["dir"]) for a in cur]   # all real readings
+    nodes=canonical_nodes(frames)
     if cur:
         cx=np.array([a["px"] for a in cur]); cy=np.array([a["py"] for a in cur])
-    items=[]
-    for px,py,lat,lon in nodes:
-        if cur:
-            dd=(cx-px)**2+(cy-py)**2; j=int(dd.argmin())
-            if dd[j]<=max_px*max_px:
-                a=cur[j]; items.append((px,py,a["speed"],a["dir"])); continue
-        items.append((px,py,None,0.0))   # no reading -> grey cell, no dart
+        for px,py,lat,lon in nodes:
+            if ((cx-px)**2+(cy-py)**2).min()>max_px*max_px:
+                items.append((px,py,None,0.0))   # no reading here -> grey cell
+    else:
+        items=[(px,py,None,0.0) for px,py,lat,lon in nodes]
     return _overlay(items)
 
 def canonical_nodes(frames):
