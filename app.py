@@ -88,9 +88,10 @@ with left:
     if ev and ev.get("last_clicked"): st.session_state["pt"]=[ev["last_clicked"]["lat"],ev["last_clicked"]["lng"]]
     # 6-band legend (dark text on light swatches, light on dark — stays readable)
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
-    chips="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};padding:2px 8px;margin:2px;color:{_txt(ex.DISPLAY_BANDS[i][1])};border:1px solid #cbd2d9;border-radius:3px'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
+    def _chip(rgb,lab): return f"<span style='background:rgb{rgb};padding:2px 8px;margin:2px;color:{_txt(rgb)};border:1px solid #cbd2d9;border-radius:3px'>{lab}</span>"
+    chips="".join(_chip(ex.DISPLAY_BANDS[i][1],ex.DISPLAY_LABELS[i]) for i in range(6))+_chip(ex.NO_READING,"no reading")
     st.markdown("**Speed (kn):** "+chips,unsafe_allow_html=True)
-    st.caption("Grey = no reading: either calm (≤0.5 kn) or a current we couldn't digitise — **don't assume calm**. Coverage is best at peak flood/ebb.")
+    st.caption("Grey 'no reading' = no arrow recovered there: could be calm OR a current we couldn't digitise — **don't assume calm**. Coverage is best at peak flood/ebb.")
 
 with right:
     st.subheader("Current at point")

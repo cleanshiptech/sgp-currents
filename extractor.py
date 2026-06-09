@@ -18,12 +18,13 @@ def bin_label(c): s=SPEED[c]; return f"{s-0.25:.1f}-{s+0.25:.1f} kn"
 # 6 display bands aligned 1:1 to native 0.5-kn bins: (upper_kn, RGB)
 # 0-0.5 is white = "calm" (near-zero / slack), so a white cell never conflicts with a
 # coloured one; the ramp then runs green -> yellow -> orange -> red with rising speed.
-# band[0] is "no reading" (grey), NOT "calm": an unrecovered cell may be genuinely slack
-# OR a 0.5-2 kn arrow we failed to digitise (white 0-0.5 merges with sea-fill; short slow
-# arrows fall below detection). Painting it "calm" would be an unsafe false-negative.
-DISPLAY_BANDS=[(0.5,(200,206,212)),(1.0,(60,170,90)),(1.5,(225,205,55)),
+# Speed ramp for *measured* cells (band[0] 0-0.5 = light blue, a real slow reading with a
+# direction). Distinct from NO_READING (grey), used only for grid cells with no recovered
+# arrow — which may be genuinely calm OR an arrow we failed to digitise, so never "calm".
+DISPLAY_BANDS=[(0.5,(150,190,225)),(1.0,(60,170,90)),(1.5,(225,205,55)),
                (2.0,(240,150,35)),(2.5,(226,59,39)),(99.0,(140,16,16))]
-DISPLAY_LABELS=["no reading","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
+DISPLAY_LABELS=["0–0.5","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
+NO_READING=(200,206,212)       # grid cell with no recovered arrow (grey; not "calm")
 def band_color(speed):
     for up,c in DISPLAY_BANDS:
         if speed<up: return c
@@ -71,11 +72,27 @@ def _elong(ys,xs):
     tr=u20+u02;root=math.sqrt(max(((u20-u02)/2)**2+u11*u11,0));l2=tr/2-root
     return (tr/2+root)/l2 if l2>1e-6 else 999.0
 
-# amin lowered from 60 to recover short (slow-current) arrows; emin shape-gate
-# rejects the thousands of round chart specks that share the legend colours
-# (sea-fill white, printed depth soundings in dark blue). Validated: +236 small
-# arrows/frame at ~12° median direction error, 3% head-flips.
-def extract_image(arr, area, amin=18, amax=260, bbox_max=50, emin=2.5):
+def _resolve_heads(out, head_min=18, k=6, rmax=140):
+    """Resolve the 180-deg head ambiguity for small arrows (n<head_min). Their orientation
+    *axis* is reliable (~15 deg) but the tip/tail sign flips ~1/3 of the time; the tidal
+    field is smooth, so pick whichever direction agrees with the nearby confident arrows."""
+    ref=[a for a in out if a["n"]>=head_min]
+    if not ref: return out
+    rx=np.array([a["px"] for a in ref]); ry=np.array([a["py"] for a in ref])
+    rdir=np.deg2rad([a["dir"] for a in ref])
+    for a in out:
+        if a["n"]>=head_min: continue
+        d=np.hypot(rx-a["px"],ry-a["py"]); idx=np.argsort(d)[:k]; idx=idx[d[idx]<=rmax]
+        if len(idx)<3: continue
+        lf=math.degrees(math.atan2(np.sin(rdir[idx]).mean(),np.cos(rdir[idx]).mean()))%360
+        if abs((a["dir"]-lf+180)%360-180)>90: a["dir"]=(a["dir"]+180)%360
+    return out
+
+# amin=8 recovers the smallest slow-current arrows (white 0-0.5, short yellow 0.5-1).
+# emin shape-gate rejects round chart specks (text/soundings); _resolve_heads fixes the
+# 180-deg head flips that plague tiny darts. Validated: tiny-arrow orientation ~15 deg
+# median vs the local field; recovery roughly doubles toward slack.
+def extract_image(arr, area, amin=8, amax=260, bbox_max=50, emin=2.5):
     """arr: HxWx3 uint8 RGB. Returns list of arrow dicts."""
     if area not in GEOREF: raise ValueError(f"No georeference for '{area}'.")
     p2lon,p2lat,_,_=georef_funcs(area); out=[]
@@ -89,8 +106,8 @@ def extract_image(arr, area, amin=18, amax=260, bbox_max=50, emin=2.5):
             if max(ys.max()-ys.min()+1,xs.max()-xs.min()+1)>bbox_max: continue
             hx,hy=_axis_head(ys,xs); cx,cy=float(xs.mean()),float(ys.mean())
             out.append(dict(px=cx,py=cy,lat=float(p2lat(cy)),lon=float(p2lon(cx)),
-                            speed=SPEED[c],dir=_bearing(hx,hy)))
-    return out
+                            speed=SPEED[c],dir=_bearing(hx,hy),n=len(xs)))
+    return _resolve_heads(out)
 def extract_arrows(path, **kw):
     area=area_from_name(path)
     return extract_image(np.asarray(Image.open(path).convert("RGB")), area, **kw), area

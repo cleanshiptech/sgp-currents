@@ -8,23 +8,23 @@ import extractor as ex
 W,H=1673,896; CELL=17; SS=3   # half-cell px; supersample factor for anti-aliasing
 # arrow glyph pointing +x: triangular head + rectangular shaft (cleaner than a flat chevron)
 DART=[(10,0),(2,-6),(2,-2.4),(-9,-2.4),(-9,2.4),(2,2.4),(2,6)]
-CALM=(200,206,212,70)          # faint grey "no reading" scaffold (calm OR below detection)
+CALM=ex.NO_READING+(70,)       # faint grey scaffold for cells with no recovered arrow
 
 def _rot(pts,ang,cx,cy,s):
     c,si=math.cos(ang),math.sin(ang)
     return [((cx+(x*c-y*si)*s), (cy+(x*si+y*c)*s)) for x,y in pts]
 
 def _overlay(items, cell_alpha=140, icon=(28,31,38)):
-    """items: (px,py,speed,deg). Cells with speed<0.5 render as a faint 'calm' scaffold
-    (no dart); faster cells get a band-coloured fill plus a haloed arrow."""
+    """items: (px,py,speed,deg). speed=None -> faint grey 'no reading' cell (no dart);
+    any real speed (incl. 0-0.5) -> band-coloured fill plus a haloed direction arrow."""
     big=Image.new("RGBA",(W*SS,H*SS),(0,0,0,0)); d=ImageDraw.Draw(big)
     cell=lambda x,y,f: d.rectangle([x-CELL*SS,y-CELL*SS,x+CELL*SS,y+CELL*SS],fill=f)
-    for px,py,speed,deg in items:                 # calm scaffold first
-        if speed<0.5: cell(px*SS,py*SS,CALM)
-    for px,py,speed,deg in items:                 # moving cells on top
-        if speed>=0.5: cell(px*SS,py*SS,ex.band_color(speed)+(cell_alpha,))
-    for px,py,speed,deg in items:                 # darts (moving only)
-        if speed<0.5: continue
+    for px,py,speed,deg in items:                 # no-reading scaffold first
+        if speed is None: cell(px*SS,py*SS,CALM)
+    for px,py,speed,deg in items:                 # measured cells on top
+        if speed is not None: cell(px*SS,py*SS,ex.band_color(speed)+(cell_alpha,))
+    for px,py,speed,deg in items:                 # darts for every measured cell
+        if speed is None: continue
         x,y=px*SS,py*SS
         ang=math.atan2(-math.cos(math.radians(deg)),math.sin(math.radians(deg)))  # heading in image coords
         d.polygon(_rot([(p[0]*1.3,p[1]*1.3) for p in DART],ang,x,y,SS),fill=(255,255,255,235))
@@ -35,9 +35,9 @@ def frame_overlay(arrows):
     return _overlay([(a["px"],a["py"],a["speed"],a["dir"]) for a in arrows])
 
 def gridded_frame_overlay(frames, ti, max_px=14):
-    """Snapshot overlay over the *full* canonical grid: coloured cell+dart where a current
-    is read at time ti, faint calm cell elsewhere — so the field is always visible even at
-    slack water (when most cells are near-zero/white and otherwise unrecoverable)."""
+    """Snapshot over the *full* canonical grid: coloured cell+dart where a current is read
+    at time ti, faint grey 'no reading' cell elsewhere — so the survey field is always
+    visible while blanks stay honestly unknown (not painted 'calm')."""
     nodes=canonical_nodes(frames); cur=frames.get(ti,[])
     if cur:
         cx=np.array([a["px"] for a in cur]); cy=np.array([a["py"] for a in cur])
@@ -47,7 +47,7 @@ def gridded_frame_overlay(frames, ti, max_px=14):
             dd=(cx-px)**2+(cy-py)**2; j=int(dd.argmin())
             if dd[j]<=max_px*max_px:
                 a=cur[j]; items.append((px,py,a["speed"],a["dir"])); continue
-        items.append((px,py,0.25,0.0))   # calm cell, no dart
+        items.append((px,py,None,0.0))   # no reading -> grey cell, no dart
     return _overlay(items)
 
 def canonical_nodes(frames):
