@@ -50,6 +50,8 @@ def gridded_frame_overlay(frames, ti, max_px=22):
                 items.append((px,py,None,0.0))   # no reading here -> grey cell
     else:
         items=[(px,py,None,0.0) for px,py,lat,lon in nodes]
+    drawn=sum(1 for it in items if it[2] is not None)
+    assert drawn==len(cur), f"render dropped arrows: drew {drawn} of {len(cur)} at {ti}"
     return _overlay(items)
 
 def canonical_nodes(frames):
