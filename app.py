@@ -11,8 +11,9 @@ st.set_page_config(page_title="MPA Current Time-Series", layout="wide")
 STATIONS={"SSP-A":(1.1963,103.6815),"SSP-B":(1.1893,103.6934),"SSP-C":(1.1818,103.7032),
           "SSP-D":(1.1715,103.7134),"SSP-ADCP":(1.1571,103.7402),
           "EBA-A":(1.2870,104.0020),"EBA-B":(1.3000,104.0680)}
-TILES={"Carto Voyager":("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
-       "Carto Positron":("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
+# Greyscale Positron first: neutral basemap so the speed colours read true.
+TILES={"Carto Positron":("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
+       "Carto Voyager":("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
        "Esri Ocean":("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}","Esri — Oceans (no tiles past z13)")}
 
 @st.cache_data(show_spinner=False, ttl=3600)   # re-check repo hourly for fresh CI data
@@ -33,56 +34,71 @@ def nearest_station(lat,lon):
 
 with st.sidebar:
     st.header("Data")
-    area=st.selectbox("Area",["SSP","EBA"])
+    area=st.selectbox("Area",["SSP","EBA","SSP + EBA"])
+    sel_areas=["SSP","EBA"] if "+" in area else [area]
     sgt_today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
     date=st.date_input("Date",sgt_today); day=date.strftime("%Y%m%d")
     remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
     remote=st.text_input("Precomputed data base URL (optional)",remote)
     xlsx=st.text_input("MPA spreadsheet (optional)","MPA_TidalCurrent_2026_Jan-Jun_compressed.xlsx")
-    if area not in ex.GEOREF:
-        st.warning(f"{area} needs georeference calibration — upload one {area} frame to add it."); st.stop()
-    day_data=get_precomputed(area,day,remote)
-    src="precomputed" if day_data else None
-    if not day_data:
-        st.info("No precomputed data for this date.")
-        if st.button(f"Build live: {area} {day}"):
-            day_data=get_live(area,day); src="live (in-memory)"
-            if not day_data:
-                st.error(f"Live build failed: {st.session_state.get('live_error','no frames for this date (future or unavailable).')}")
-    if day_data: st.caption(f"source: {src} · {len(day_data['frames'])}/48 frames")
+    missing_cal=[a for a in sel_areas if a not in ex.GEOREF]
+    if missing_cal:
+        st.warning(f"{', '.join(missing_cal)} needs georeference calibration — upload one frame to add it."); st.stop()
+    loaded=[]                                  # [(area_name, day_data), ...]
+    for a in sel_areas:
+        dd=get_precomputed(a,day,remote)
+        if not dd and len(sel_areas)==1:       # live fallback only for a single area
+            st.info("No precomputed data for this date.")
+            if st.button(f"Build live: {a} {day}"):
+                dd=get_live(a,day)
+                if not dd: st.error(f"Live build failed: {st.session_state.get('live_error','no frames for this date (future or unavailable).')}")
+        if dd and dd.get("frames"): loaded.append((a,dd))
+    if loaded: st.caption("source: precomputed · "+" · ".join(f"{a} {len(dd['frames'])}/48" for a,dd in loaded))
+    elif len(sel_areas)>1: st.info(f"No precomputed data for {day} in either area.")
     if st.button("↻ Reload latest data"): get_precomputed.clear(); st.rerun()
     st.markdown("---")
     basemap=st.selectbox("Basemap",list(TILES))
     view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
     opacity=st.slider("Overlay opacity",0.3,1.0,0.85)
 
-if not day_data or not day_data["frames"]:
+if not loaded:
     st.title("MPA Current Time-Series")
     st.info("Choose area/date. If not precomputed, click **Build live** in the sidebar."); st.stop()
-frames=day_data["frames"]; sw=day_data["bounds"]["sw"]; ne=day_data["bounds"]["ne"]; times=sorted(frames)
-daymax=max((len(v) for v in frames.values()),default=0)   # peak-flow frame, for slack detection
+
+# combined bounds + union of frame times across the selected area(s)
+allsw=[dd["bounds"]["sw"] for _,dd in loaded]; allne=[dd["bounds"]["ne"] for _,dd in loaded]
+sw=[min(s[0] for s in allsw),min(s[1] for s in allsw)]; ne=[max(n[0] for n in allne),max(n[1] for n in allne)]
+times=sorted(set().union(*[set(dd["frames"]) for _,dd in loaded]))
+tcount=lambda ti: sum(len(dd["frames"].get(ti,[])) for _,dd in loaded)     # arrows across all areas
+daymax=max((tcount(t) for t in times),default=0)
 
 hcol,bcol=st.columns([5,1])
 hcol.subheader(f"{area} · {date:%d %b %Y}")
-hcol.caption(f"{src} · {len(frames)}/48 frames · click the map to drop a worksite")
+hcol.caption("precomputed · click the map to drop a worksite")
 if "pt" in st.session_state and bcol.button("Clear pin"): del st.session_state["pt"]; st.rerun()
 
 left,right=st.columns([3,2])
 with left:
     if view=="Snapshot (time)":
-        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.gridded_frame_overlay(frames,ti); cap=f"{area} {day} {ti} · {len(frames[ti])} arrows"
-        if daymax and len(frames[ti])<0.25*daymax:
-            st.info("⚓ **Slack water** — currents are near zero (≤0.5 kn, drawn white and below the readable threshold), so the map is sparse by design. Slide to a flood/ebb time for the working-current picture.")
+        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2])
+        overlays=[(R.gridded_frame_overlay(dd["frames"],ti),dd["bounds"]) for _,dd in loaded if ti in dd["frames"]]
+        cap=f"{area} {day} {ti} · {tcount(ti)} arrows"
+        if daymax and tcount(ti)<0.25*daymax:
+            st.info("⚓ **Slack water** — currents are near zero (≤0.5 kn, shown as the faint blue 'calm' grid), so the map is quiet by design. Slide to a flood/ebb time for the working current.")
     else:
-        stat="max" if "max" in view else "mean"; overlay=R.aggregate_overlay(frames,stat); cap=f"{area} {day} · {stat} over day"
+        stat="max" if "max" in view else "mean"
+        overlays=[(R.aggregate_overlay(dd["frames"],stat),dd["bounds"]) for _,dd in loaded]
+        cap=f"{area} {day} · {stat} over day"
     url,attr=TILES[basemap]
-    m=folium.Map(location=[(sw[0]+ne[0])/2,(sw[1]+ne[1])/2],zoom_start=12,tiles=url,attr=attr)
-    folium.raster_layers.ImageOverlay(R.png_data_uri(overlay),bounds=[sw,ne],opacity=opacity).add_to(m)
+    m=folium.Map(location=[(sw[0]+ne[0])/2,(sw[1]+ne[1])/2],zoom_start=11 if len(loaded)>1 else 12,tiles=url,attr=attr)
+    for ov,bnd in overlays:
+        folium.raster_layers.ImageOverlay(R.png_data_uri(ov),bounds=[bnd["sw"],bnd["ne"]],opacity=opacity).add_to(m)
+    if len(loaded)>1: m.fit_bounds([sw,ne])
     if "pt" in st.session_state: folium.Marker(st.session_state["pt"]).add_to(m)
     st.caption(cap)
     ev=st_folium(m,height=470,use_container_width=True,returned_objects=["last_clicked"])
     if ev and ev.get("last_clicked"): st.session_state["pt"]=[ev["last_clicked"]["lat"],ev["last_clicked"]["lng"]]
-    # 6-band legend (dark text on light swatches, light on dark — stays readable for white "calm")
+    # 6-band legend (dark text on light swatches, light on dark — stays readable)
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
     chips="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};padding:2px 8px;margin:2px;color:{_txt(ex.DISPLAY_BANDS[i][1])};border:1px solid #cbd2d9;border-radius:3px'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
     st.markdown("**Speed (kn):** "+chips,unsafe_allow_html=True)
@@ -91,8 +107,16 @@ with right:
     st.subheader("Current at point")
     if "pt" not in st.session_state: st.info("Click the map to choose a worksite."); st.stop()
     plat,plon=st.session_state["pt"]; st.caption(f"{plat:.4f} N, {plon:.4f} E")
-    ser=R.point_series(frames,plat,plon,max_km=1.0)
-    if not ser: st.warning("No arrows within 1 km (land or outside field)."); st.stop()
+    # pick whichever loaded area has the nearest arrow to the point
+    best=None
+    for a,dd in loaded:
+        s=R.point_series(dd["frames"],plat,plon,max_km=1.0)
+        if s:
+            mind=min(r[3] for r in s)
+            if best is None or mind<best[0]: best=(mind,a,s)
+    if best is None: st.warning("No arrows within 1 km (land or outside field)."); st.stop()
+    _,parea,ser=best
+    if len(loaded)>1: st.caption(f"area: {parea}")
     df=pd.DataFrame(ser,columns=["time","speed","dir","dist_km"])
     df["t"]=pd.to_datetime(df["time"],format="%H%M").dt.strftime("%H:%M")
     c1,c2,c3=st.columns(3)
@@ -115,7 +139,7 @@ with right:
     if dkm<0.4 and os.path.isfile(xlsx):
         try:
             xa=pd.read_excel(xlsx,sheet_name="Current Data"); d=dt.datetime.strptime(day,"%Y%m%d")
-            es=xa[(xa.Area==area)&(xa.Month==d.month)&(xa.Day==d.day)&(xa.Station==stn.split("-")[1])]
+            es=xa[(xa.Area==parea)&(xa.Month==d.month)&(xa.Day==d.day)&(xa.Station==stn.split("-")[1])]
             if not es.empty:
                 es=es.assign(t=es.Hour_SGT.map(lambda h:f"{int(h):02d}:00"))
                 st.caption(f"dashed = exact MPA value at {stn} ({dkm*1000:.0f} m)")
