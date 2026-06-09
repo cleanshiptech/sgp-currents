@@ -36,6 +36,10 @@ GEOREF={"SSP":dict(x_px=[504,1024,1543],x_deg=[103.6997,103.7997,103.8997],
                    y_px=[109,419,729],   y_deg=[1.2400,1.1600,1.0800]),
         "EBA":dict(x_px=[618,1137],      x_deg=[103.9997,104.0997],
                    y_px=[252,872],       y_deg=[1.3200,1.1600])}
+# Areas that draw the 0-0.5 kn band in their sea-background colour (only the black outline
+# shows) -> recover those calm arrows from the outline. SSP draws 0-0.5 in white, which the
+# colour matcher already catches, so it is NOT listed here.
+CALM_OUTLINE_AREAS={"EBA"}
 
 def _fit(px,deg):
     m,b=np.polyfit(np.array(px,float),np.array(deg,float),1); return m,b
@@ -72,6 +76,35 @@ def _elong(ys,xs):
     tr=u20+u02;root=math.sqrt(max(((u20-u02)/2)**2+u11*u11,0));l2=tr/2-root
     return (tr/2+root)/l2 if l2>1e-6 else 999.0
 
+def _outline_calm(arr, area, ref, dark_thr=90, amin=8, amax=200, emin=2.5, emax=10,
+                  bbox_max=50, bbf_min=0.45, dedupe=13, k=6, rmax=140):
+    """Recover 0-0.5 kn arrows whose fill is the sea-background colour (only their dark
+    outline is visible). A line-fragment filter rejects chart boundaries/cables: real darts
+    are moderately elongated and fill their bbox (>=0.45), while line strokes are thinner
+    (lower bbox-fill) and more elongated (>emax). Each kept arrow is classed 0-0.5 and
+    oriented against the colour-detected field `ref` (its own head sign is unreliable)."""
+    p2lon,p2lat,_,_=georef_funcs(area)
+    dark=arr.astype(int).sum(2)<dark_thr; lbl,n=ndimage.label(dark); objs=ndimage.find_objects(lbl)
+    rx=np.array([a["px"] for a in ref]); ry=np.array([a["py"] for a in ref]); rd=np.array([a["dir"] for a in ref])
+    out=[]
+    for kk in range(1,n+1):
+        sl=objs[kk-1]; ys,xs=np.where(lbl[sl]==kk); L=len(xs)
+        if not(amin<=L<=amax): continue
+        e=_elong(ys,xs)
+        if e<emin or e>emax: continue
+        H=ys.max()-ys.min()+1; Wd=xs.max()-xs.min()+1
+        if max(H,Wd)>bbox_max or L/(H*Wd)<bbf_min: continue
+        cx,cy=float(xs.mean()+sl[1].start),float(ys.mean()+sl[0].start)
+        if len(rx) and ((rx-cx)**2+(ry-cy)**2).min()<dedupe*dedupe: continue   # already a colour arrow
+        hx,hy=_axis_head(ys+sl[0].start,xs+sl[1].start); b=_bearing(hx,hy)
+        if len(rx):                                          # orient against the colour field
+            d=np.hypot(rx-cx,ry-cy); idx=np.argsort(d)[:k]; idx=idx[d[idx]<=rmax]
+            if len(idx)>=3:
+                lf=math.degrees(math.atan2(np.sin(np.deg2rad(rd[idx])).mean(),np.cos(np.deg2rad(rd[idx])).mean()))%360
+                if abs((b-lf+180)%360-180)>90: b=(b+180)%360
+        out.append(dict(px=cx,py=cy,lat=float(p2lat(cy)),lon=float(p2lon(cx)),speed=0.25,dir=b,n=L))
+    return out
+
 def _resolve_heads(out, head_min=18, k=6, rmax=140):
     """Resolve the 180-deg head ambiguity for small arrows (n<head_min). Their orientation
     *axis* is reliable (~15 deg) but the tip/tail sign flips ~1/3 of the time; the tidal
@@ -107,7 +140,10 @@ def extract_image(arr, area, amin=8, amax=260, bbox_max=50, emin=2.5):
             hx,hy=_axis_head(ys,xs); cx,cy=float(xs.mean()),float(ys.mean())
             out.append(dict(px=cx,py=cy,lat=float(p2lat(cy)),lon=float(p2lon(cx)),
                             speed=SPEED[c],dir=_bearing(hx,hy),n=len(xs)))
-    return _resolve_heads(out)
+    out=_resolve_heads(out)
+    if area in CALM_OUTLINE_AREAS:                 # add background-colour 0-0.5 arrows (EBA)
+        out=out+_outline_calm(arr,area,out)
+    return out
 def extract_arrows(path, **kw):
     area=area_from_name(path)
     return extract_image(np.asarray(Image.open(path).convert("RGB")), area, **kw), area

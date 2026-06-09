@@ -58,6 +58,12 @@ Writes `data/SSP_20260615.json`. The workflow commits these to the `data` branch
   orientation is reliable (~15° vs the field) but the tip/tail sign flips ~⅓ of the time,
   so `_resolve_heads` re-orients each tiny arrow to agree with its confident neighbours.
   White arrows are still lost where the chart sea-fill is *itself* white (no contrast).
+- **Outline recovery of background-colour calm arrows.** Some areas (EBA, in
+  `CALM_OUTLINE_AREAS`) draw the 0–0.5 kn band in their *sea-background* colour, so only the
+  black outline shows and colour-matching gets none. `_outline_calm` recovers them from the
+  dark outline, rejects chart boundary/cable lines via an elongation cap + bbox-fill floor,
+  and orients each against the colour-detected field. (SSP draws 0–0.5 in white, so it
+  doesn't need this.)
 - **Colour-blocked band.** The **2.0–2.5 kn** band (dark blue `0,64,128`) is *excluded*: it's
   indistinguishable from printed depth soundings (0 genuine arrows even at peak ebb), so
   reading it only produced false high-current cells. Reliable range is **0.5–2.0 kn** —
