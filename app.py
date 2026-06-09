@@ -50,6 +50,7 @@ with st.sidebar:
             if not day_data:
                 st.error(f"Live build failed: {st.session_state.get('live_error','no frames for this date (future or unavailable).')}")
     if day_data: st.caption(f"source: {src} · {len(day_data['frames'])}/48 frames")
+    if st.button("↻ Reload latest data"): get_precomputed.clear(); st.rerun()
     st.markdown("---")
     basemap=st.selectbox("Basemap",list(TILES))
     view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
@@ -68,7 +69,7 @@ if "pt" in st.session_state and bcol.button("Clear pin"): del st.session_state["
 left,right=st.columns([3,2])
 with left:
     if view=="Snapshot (time)":
-        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.frame_overlay(frames[ti]); cap=f"{area} {day} {ti}"
+        ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2]); overlay=R.frame_overlay(frames[ti]); cap=f"{area} {day} {ti} · {len(frames[ti])} arrows"
     else:
         stat="max" if "max" in view else "mean"; overlay=R.aggregate_overlay(frames,stat); cap=f"{area} {day} · {stat} over day"
     url,attr=TILES[basemap]
