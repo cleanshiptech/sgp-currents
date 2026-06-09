@@ -8,7 +8,7 @@ import extractor as ex
 W,H=1673,896; CELL=17; SS=3   # half-cell px; supersample factor for anti-aliasing
 # arrow glyph pointing +x: triangular head + rectangular shaft (cleaner than a flat chevron)
 DART=[(10,0),(2,-6),(2,-2.4),(-9,-2.4),(-9,2.4),(2,2.4),(2,6)]
-CALM=(150,190,225,70)          # faint light-blue scaffold for near-zero-current (slack) cells
+CALM=(200,206,212,70)          # faint grey "no reading" scaffold (calm OR below detection)
 
 def _rot(pts,ang,cx,cy,s):
     c,si=math.cos(ang),math.sin(ang)

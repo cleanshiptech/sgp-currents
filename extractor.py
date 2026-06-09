@@ -18,9 +18,12 @@ def bin_label(c): s=SPEED[c]; return f"{s-0.25:.1f}-{s+0.25:.1f} kn"
 # 6 display bands aligned 1:1 to native 0.5-kn bins: (upper_kn, RGB)
 # 0-0.5 is white = "calm" (near-zero / slack), so a white cell never conflicts with a
 # coloured one; the ramp then runs green -> yellow -> orange -> red with rising speed.
-DISPLAY_BANDS=[(0.5,(150,190,225)),(1.0,(60,170,90)),(1.5,(225,205,55)),
+# band[0] is "no reading" (grey), NOT "calm": an unrecovered cell may be genuinely slack
+# OR a 0.5-2 kn arrow we failed to digitise (white 0-0.5 merges with sea-fill; short slow
+# arrows fall below detection). Painting it "calm" would be an unsafe false-negative.
+DISPLAY_BANDS=[(0.5,(200,206,212)),(1.0,(60,170,90)),(1.5,(225,205,55)),
                (2.0,(240,150,35)),(2.5,(226,59,39)),(99.0,(140,16,16))]
-DISPLAY_LABELS=["0–0.5 calm","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
+DISPLAY_LABELS=["no reading","0.5–1.0","1.0–1.5","1.5–2.0","2.0–2.5","≥2.5"]
 def band_color(speed):
     for up,c in DISPLAY_BANDS:
         if speed<up: return c

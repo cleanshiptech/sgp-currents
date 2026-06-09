@@ -72,7 +72,7 @@ with left:
         overlays=[(R.gridded_frame_overlay(dd["frames"],ti),dd["bounds"]) for _,dd in loaded if ti in dd["frames"]]
         cap=f"{area} {day} {ti} · {tcount(ti)} arrows"
         if daymax and tcount(ti)<0.25*daymax:
-            st.info("⚓ **Slack water** — currents are near zero (≤0.5 kn, shown as the faint blue 'calm' grid), so the map is quiet by design. Slide to a flood/ebb time for the working current.")
+            st.info("⚓ **Slack water** — few readable arrows (currents near zero); most cells are 'no reading'. Slide to a flood/ebb time for the working current.")
     else:
         stat="max" if "max" in view else "mean"
         overlays=[(R.aggregate_overlay(dd["frames"],stat),dd["bounds"]) for _,dd in loaded]
@@ -90,6 +90,7 @@ with left:
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
     chips="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};padding:2px 8px;margin:2px;color:{_txt(ex.DISPLAY_BANDS[i][1])};border:1px solid #cbd2d9;border-radius:3px'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
     st.markdown("**Speed (kn):** "+chips,unsafe_allow_html=True)
+    st.caption("Grey = no reading: either calm (≤0.5 kn) or a current we couldn't digitise — **don't assume calm**. Coverage is best at peak flood/ebb.")
 
 with right:
     st.subheader("Current at point")

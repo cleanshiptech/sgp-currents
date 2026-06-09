@@ -49,9 +49,12 @@ Writes `data/SSP_20260615.json`. The workflow commits these to the `data` branch
   numbers stay in the spreadsheet (overlaid as a dashed line near known stations).
 - Arrows under MPA's drawn station markers read poorly; merged fast-channel arrows are
   under-recovered (anchorages are clean).
-- **Colour-blocked bands.** The **0–0.5 kn** band (white) shares the chart's sea-fill, so
-  near-zero/slack cells can't be read individually — they're shown as a faint "calm"
-  scaffold instead. The **2.0–2.5 kn** band (dark blue `0,64,128`) is *excluded*: it's
+- **"No reading" ≠ calm.** Unrecovered cells render as a faint grey scaffold, NOT as
+  "calm": a blank cell may be genuinely slack OR a 0.5–2 kn arrow we failed to digitise
+  (white 0–0.5 merges with the sea-fill; short slow arrows fall below detection). Recovery
+  is best at peak flood/ebb and thins toward slack — never read grey as "safe to dive".
+- **Colour-blocked bands.** The **0–0.5 kn** band (white) shares the chart's sea-fill and
+  can't be read at all. The **2.0–2.5 kn** band (dark blue `0,64,128`) is *excluded*: it's
   indistinguishable from printed depth soundings (0 genuine arrows even at peak ebb), so
   reading it only produced false high-current cells. Reliable range is **0.5–2.0 kn** —
   which brackets the 1.3 kn ROV limit, the operationally relevant threshold.
