@@ -11,9 +11,9 @@ st.set_page_config(page_title="MPA Current Time-Series", layout="wide")
 STATIONS={"SSP-A":(1.1963,103.6815),"SSP-B":(1.1893,103.6934),"SSP-C":(1.1818,103.7032),
           "SSP-D":(1.1715,103.7134),"SSP-ADCP":(1.1571,103.7402),
           "EBA-A":(1.2870,104.0020),"EBA-B":(1.3000,104.0680)}
-TILES={"Esri Ocean":("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}","Esri — Oceans"),
+TILES={"Carto Voyager":("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
        "Carto Positron":("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO"),
-       "Carto Voyager":("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png","© OpenStreetMap, © CARTO")}
+       "Esri Ocean":("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}","Esri — Oceans (no tiles past z13)")}
 
 @st.cache_data(show_spinner=False, ttl=3600)   # re-check repo hourly for fresh CI data
 def get_precomputed(area,day,remote): return D.load_precomputed(area,day,remote_base=remote)
