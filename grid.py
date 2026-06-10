@@ -14,6 +14,7 @@ Needs all of a day's frames. data.build() drives it; extractor.extract_image sta
 single-frame use.
 """
 import numpy as np, math
+from collections import Counter
 from scipy import ndimage
 from scipy.spatial import cKDTree
 import extractor as ex
@@ -78,34 +79,42 @@ def _fast_fill(frames, cm, anchors, S=SP):
         d,_ = cKDTree(anchors).query(cand); cand = cand[d>18]
     return cand.astype(float)
 
-def build_grid(frames, cm, area, dedup=17, union_max=16, per=None):
-    """Complete fixed grid = the union of per-frame detections (so every cell active at any
-    tide state is present, incl. the merged fast channel via extract_image's tiling), plus a
-    lattice fill of the persistent fast region, deduplicated at `dedup` px. Seeded densest-
-    frame-first. `per` (precomputed [extract_image(frame) ...] aligned to frames) is reused
-    if given; otherwise the detector runs on up to `union_max` frames across the day."""
+def _circ(v,p):
+    """Circular-mean phase of values v against period p (robust to the centroid wobble, which is
+    ~zero-mean around the true node once the current rotates through the day)."""
+    return np.angle(np.mean(np.exp(2j*np.pi*v/p)))/(2*np.pi)*p
+
+def _fit_lattice(P, lo=32, hi=37, step=0.05):
+    """Find the fixed grid (pitch, x-phase, y-phase) the glyphs are plotted on, by the pitch that
+    minimises the median snap residual. Phase from the circular mean (wobble averages out)."""
+    best=None
+    for pit in np.arange(lo,hi,step):
+        x0=_circ(P[:,0],pit); y0=_circ(P[:,1],pit)
+        rx=np.abs(((P[:,0]-x0+pit/2)%pit)-pit/2); ry=np.abs(((P[:,1]-y0+pit/2)%pit)-pit/2)
+        r=np.median(np.hypot(rx,ry))
+        if best is None or r<best[0]: best=(r,pit,x0,y0)
+    return best[1],best[2],best[3]
+
+def build_grid(frames, cm, area, union_max=16, per=None, minsup=2):
+    """Fixed grid = the lattice the glyphs are plotted on. The arrows sit on a regular grid; a
+    glyph's detected centroid only wobbles ~10px around its node as the current rotates. So we
+    (1) fit the lattice pitch+phase from the single-glyph centroids (n>0), then (2) SNAP every
+    detection to its nearest lattice node. Snapping is rotation-proof -- all of a glyph's wobbling
+    centroids fall within half a cell of the same node and collapse automatically (no clustering,
+    no over-sampling). Nodes hit in >= `minsup` frames are kept (drops transient noise)."""
     if per is not None:
-        order = sorted(range(len(per)), key=lambda f: -len(per[f]))
-        pts = [(d["px"], d["py"]) for f in order for d in per[f]]
+        dets = [d for f in per for d in f]
     else:
         idx = np.unique(np.linspace(0, len(frames)-1, min(len(frames), union_max)).astype(int))
-        pe = {f: ex.extract_image(frames[f], area) for f in idx}
-        order = sorted(idx, key=lambda f: -len(pe[f]))
-        pts = [(d["px"], d["py"]) for f in order for d in pe[f]]
-    # NB: no lattice "fast fill" — the extract_image union already covers the merged channel
-    # (via its gated merged-tiling), and a raw fast-colour fill drops false cells onto solid
-    # non-arrow chart features (e.g. dark-maroon blobs) -> phantom high-speed reds.
-    cells=[]; hsh={}; D2=dedup*dedup; b=dedup                    # greedy spatial-hash dedup, O(n)
-    for x,y in pts:
-        gx,gy=int(x//b),int(y//b); near=False
-        for ix in (gx-1,gx,gx+1):
-            for iy in (gy-1,gy,gy+1):
-                for cx,cy in hsh.get((ix,iy),()):
-                    if (cx-x)**2+(cy-y)**2<D2: near=True; break
-                if near: break
-            if near: break
-        if not near: cells.append((x,y)); hsh.setdefault((gx,gy),[]).append((x,y))
-    return np.array(cells)
+        dets = [d for f in idx for d in ex.extract_image(frames[f], area)]
+    if not dets: return np.empty((0,2))
+    A  = np.array([(d["px"],d["py"]) for d in dets], float)              # all detections
+    Sg = np.array([(d["px"],d["py"]) for d in dets if d["n"]>0], float)  # single glyphs -> pitch
+    pit,x0,y0 = _fit_lattice(Sg if len(Sg)>=50 else A)
+    i=np.round((A[:,0]-x0)/pit).astype(int); j=np.round((A[:,1]-y0)/pit).astype(int)
+    c=Counter(zip(i.tolist(), j.tolist()))
+    nodes=[(x0+a*pit, y0+b*pit) for (a,b),k in c.items() if k>=minsup]   # survey extent = hit nodes
+    return np.array(nodes) if nodes else np.empty((0,2))
 
 def sample_cell(arr, cm, cx, cy, rb=16):
     """Cascade read at a fixed cell: try the UNAMBIGUOUS solid colours first (yellow/green/
