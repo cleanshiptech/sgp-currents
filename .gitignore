@@ -12,6 +12,7 @@ env/
 data/
 *.xlsx
 icons_preview.png
+_*.png          # temp validation / diagnostic renders
 
 # OS / editor
 .DS_Store

@@ -121,7 +121,7 @@ def _resolve_heads(out, head_min=18, k=6, rmax=140):
         if abs((a["dir"]-lf+180)%360-180)>90: a["dir"]=(a["dir"]+180)%360
     return out
 
-def _merged_cells(arr, area, step=30, amax=260, bbmin=55, bbmax=1000, smin=1.0):
+def _merged_cells(arr, area, step=30, amax=260, bbmin=28, bbmax=1000, smin=1.0, maxfill=0.6):
     """Recover fast-channel currents that the single-arrow pass drops. On strong tides the
     long fast darts touch and form one connected colour blob bigger than `amax`, leaving a
     blank in the strait's strongest (most dangerous) flow. Such a clump is tiled into cells
@@ -137,6 +137,7 @@ def _merged_cells(arr, area, step=30, amax=260, bbmin=55, bbmax=1000, smin=1.0):
             if len(xs)<=amax: continue
             H=ys.max()-ys.min()+1; W=xs.max()-xs.min()+1
             if not(bbmin<max(H,W)<bbmax): continue
+            if len(xs)/(H*W)>maxfill: continue     # solid block = legend swatch, not an arrow clump
             ys=ys+sl[0].start; xs=(xs+sl[1].start)
             x=xs.astype(float)-xs.mean(); y=ys.astype(float)-ys.mean()
             u20=(x*x).mean();u02=(y*y).mean();u11=(x*y).mean(); th=0.5*math.atan2(2*u11,u20-u02)
