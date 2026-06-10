@@ -21,6 +21,7 @@ import extractor as ex
 SAMPLE_COLS = ex.FILL + [(0,64,128)]          # include blue (separable once de-cluttered)
 SPEEDS = {**ex.SPEED, (0,64,128): 2.25}
 SP = 34                                        # lattice spacing (px), from NN-distance histogram
+BAND_MIDS = [0.25,0.75,1.25,1.75,2.25,2.75,3.25,3.75,4.25]   # speed bins; JSON stores index+1 (0=no reading)
 # Solid bands have no clutter -> read RAW colour (robust, like the global extractor).
 # Ambiguous bands share colour with static chart features -> gate by the change-mask only:
 #   white (255,255,255) == sea-fill background;  blue (0,64,128) == depth soundings.
@@ -137,20 +138,18 @@ def sample_cell(arr, cm, cx, cy, rb=16):
     return dict(px=float(cx),py=float(cy),speed=SPEEDS[c],n=len(xs))   # speed only; dir set per-frame
 
 def extract_frame(arr, cm, grid, area, ref=None):
-    """Per-cell SPEED from the v2 grid read (complete, incl. blue/white); DIRECTION from the
-    global extractor, whose headings are validated to ~3 deg everywhere (it derives the merged
-    clump's true axis). Each cell inherits the nearest validated flow direction — correct even
-    for blue/extra cells, since the current field is locally coherent."""
-    p2lon,p2lat,_,_=ex.georef_funcs(area)
-    if ref is None: ref=ex.extract_image(arr,area)       # validated direction field
+    """Returns [(cell_index, speed, dir), ...] for grid cells with a reading this frame.
+    SPEED read at the cell (complete, incl. blue/white); DIRECTION inherited from the global
+    extractor's validated field (`ref`) — correct even for blue/extra cells since the current
+    field is locally coherent. (lat/lon are derived from the cell on load, not stored.)"""
+    if ref is None: ref=ex.extract_image(arr,area)
     if ref:
         rxy=np.array([[a["px"],a["py"]] for a in ref]); rdir=np.array([a["dir"] for a in ref])
         tree=cKDTree(rxy)
     out=[]
-    for cx,cy in grid:
+    for i,(cx,cy) in enumerate(grid):
         s=sample_cell(arr,cm,cx,cy)
         if not s: continue
-        s["dir"]=float(rdir[tree.query([cx,cy])[1]]) if ref else 0.0
-        s["lat"]=float(p2lat(cy)); s["lon"]=float(p2lon(cx))
-        out.append(s)
+        dv=float(rdir[tree.query([cx,cy])[1]]) if ref else 0.0
+        out.append((i, s["speed"], dv))
     return out

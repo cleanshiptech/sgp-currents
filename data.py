@@ -13,17 +13,16 @@ def bounds(area):
     p2lon,p2lat,_,_=ex.georef_funcs(area)
     return dict(sw=[p2lat(H-1),p2lon(0)], ne=[p2lat(0),p2lon(W-1)])
 
-def _arrows_compact(arrows):
-    # compact JSON: px/py & heading as ints, lat/lon to 4dp (~11m), speed to 0.1kn
-    return [{"lat":round(a["lat"],4),"lon":round(a["lon"],4),"px":int(round(a["px"])),
-             "py":int(round(a["py"])),"speed":round(a["speed"],1),"dir":int(round(a["dir"]))%360}
-            for a in arrows]
-
 def build(area, day, fetcher=F.fetch_bytes, progress=None):
-    """Grid-anchored build (v2): fetch the day's frames, recover a fixed cell grid from the
+    """Grid-anchored build (v2). Fetch the day's frames, recover a fixed cell grid from the
     arrow layer (temporal differencing removes static chart clutter), then read each cell's
-    band-colour + heading every frame. Stable grid -> jitter-free; de-cluttered -> recovers
-    blue (2.0-2.5) and white-on-white (0-0.5)."""
+    band-colour + heading every frame. De-cluttered -> recovers blue (2.0-2.5) and
+    white-on-white (0-0.5); stable grid -> jitter-free.
+
+    Compact schema (grid stored ONCE, not per frame):
+      {area, date, bounds, grid:[[px,py]...], frames:{HHMM:{s:[band-idx/cell], d:[dir/cell]}}}
+      band-idx: 0 = no reading, else index into grid.BAND_MIDS + 1; lat/lon derived on load.
+    """
     s=requests.Session(); raw={}
     for i,hhmm in enumerate(F.SLOTS):
         if progress: progress((i+1)/len(F.SLOTS), f"{area} {day} {hhmm}")
@@ -31,27 +30,48 @@ def build(area, day, fetcher=F.fetch_bytes, progress=None):
         if b is not None: raw[hhmm]=np.asarray(Image.open(io.BytesIO(b)).convert("RGB"))
     slots=sorted(raw); missing=[h for h in F.SLOTS if h not in raw]
     if not slots:
-        return dict(area=area,date=day,bounds=bounds(area),frames={},missing=missing)
+        return dict(area=area,date=day,bounds=bounds(area),grid=[],frames={},missing=missing)
     stack=np.stack([raw[h] for h in slots])
     cm=G.change_mask(stack)
     per=[ex.extract_image(raw[h],area) for h in slots]   # validated detector, once per frame
-    gridc=G.build_grid(stack,cm,area,per=per)             # reused for the grid union
-    frames={h:_arrows_compact(G.extract_frame(raw[h],cm,gridc,area,ref=per[i]))  # ...and direction
-            for i,h in enumerate(slots)}
-    return dict(area=area,date=day,bounds=bounds(area),frames=frames,missing=missing)
+    gridc=G.build_grid(stack,cm,area,per=per)            # reused for grid union AND direction
+    glist=[[int(round(px)),int(round(py))] for px,py in gridc]; N=len(gridc)
+    b2i={round(m,2):i+1 for i,m in enumerate(G.BAND_MIDS)}
+    frames={}
+    for i,h in enumerate(slots):
+        sp=[0]*N; di=[0]*N
+        for ci,speed,direc in G.extract_frame(raw[h],cm,gridc,area,ref=per[i]):
+            sp[ci]=b2i.get(round(speed,2),0); di[ci]=int(round(direc))%360
+        frames[h]={"s":sp,"d":di}
+    return dict(area=area,date=day,bounds=bounds(area),grid=glist,frames=frames,missing=missing)
 
 # ---- app-side loading ----
+def _expand(dd, area):
+    """Compact schema -> the {frames:{HHMM:[arrow dicts]}} the app/render expect."""
+    grid=dd["grid"]; p2lon,p2lat,_,_=ex.georef_funcs(area)
+    lat=[round(p2lat(py),5) for px,py in grid]; lon=[round(p2lon(px),5) for px,py in grid]
+    frames={}
+    for h,fr in dd["frames"].items():
+        s=fr["s"]; d=fr["d"]; arr=[]
+        for i,b in enumerate(s):
+            if b:
+                px,py=grid[i]
+                arr.append({"px":px,"py":py,"speed":G.BAND_MIDS[b-1],"dir":d[i],"lat":lat[i],"lon":lon[i]})
+        frames[h]=arr
+    return dict(area=dd["area"],date=dd["date"],bounds=dd["bounds"],frames=frames,missing=dd.get("missing",[]))
+
 def load_precomputed(area, day, remote_base=None, local_dir="data"):
-    fn=f"{area}_{day}.json"
+    fn=f"{area}_{day}.json"; dd=None
     p=os.path.join(local_dir,fn)
     if os.path.isfile(p):
-        return json.load(open(p))
-    if remote_base:
+        dd=json.load(open(p))
+    elif remote_base:
         try:
             r=requests.get(remote_base.rstrip("/")+"/"+fn,timeout=20)
-            if r.status_code==200 and r.text.strip().startswith("{"): return r.json()
-        except Exception: return None
-    return None
+            if r.status_code==200 and r.text.strip().startswith("{"): dd=r.json()
+        except Exception: dd=None
+    if dd is None: return None
+    return _expand(dd,area) if "grid" in dd else dd   # expand compact; pass through legacy
 
 def build_live(area, day, progress=None):
     return build(area, day, progress=progress)
