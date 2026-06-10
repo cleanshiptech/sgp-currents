@@ -121,10 +121,35 @@ def _resolve_heads(out, head_min=18, k=6, rmax=140):
         if abs((a["dir"]-lf+180)%360-180)>90: a["dir"]=(a["dir"]+180)%360
     return out
 
+def _merged_cells(arr, area, step=30, amax=260, bbmin=55, bbmax=1000, smin=1.0):
+    """Recover fast-channel currents that the single-arrow pass drops. On strong tides the
+    long fast darts touch and form one connected colour blob bigger than `amax`, leaving a
+    blank in the strait's strongest (most dangerous) flow. Such a clump is tiled into cells
+    (band speed + the clump's principal-axis direction; head sign resolved later vs
+    neighbours). Restricted to >=1 kn bands so the white/yellow sea-fill can't qualify, and
+    to a bbox window that excludes the compact legend swatches and the huge background."""
+    p2lon,p2lat,_,_=georef_funcs(area); out=[]
+    for c in FILL:
+        if SPEED[c]<smin: continue
+        m=np.all(arr==np.array(c),axis=2); lbl,n=ndimage.label(m); objs=ndimage.find_objects(lbl)
+        for k in range(1,n+1):
+            sl=objs[k-1]; ys,xs=np.where(lbl[sl]==k)
+            if len(xs)<=amax: continue
+            H=ys.max()-ys.min()+1; W=xs.max()-xs.min()+1
+            if not(bbmin<max(H,W)<bbmax): continue
+            ys=ys+sl[0].start; xs=(xs+sl[1].start)
+            x=xs.astype(float)-xs.mean(); y=ys.astype(float)-ys.mean()
+            u20=(x*x).mean();u02=(y*y).mean();u11=(x*y).mean(); th=0.5*math.atan2(2*u11,u20-u02)
+            br=_bearing(math.cos(th),math.sin(th))
+            for px,py in {(int(round(a/step)*step),int(round(b/step)*step)) for a,b in zip(xs,ys)}:
+                out.append(dict(px=float(px),py=float(py),lat=float(p2lat(py)),lon=float(p2lon(px)),
+                                speed=SPEED[c],dir=br,n=0))
+    return out
+
 # amin=8 recovers the smallest slow-current arrows (white 0-0.5, short yellow 0.5-1).
 # emin shape-gate rejects round chart specks (text/soundings); _resolve_heads fixes the
-# 180-deg head flips that plague tiny darts. Validated: tiny-arrow orientation ~15 deg
-# median vs the local field; recovery roughly doubles toward slack.
+# 180-deg head flips that plague tiny darts. _merged_cells fills the fast channel where
+# strong arrows merge into over-size blobs. Validated: tiny-arrow orientation ~15 deg median.
 def extract_image(arr, area, amin=8, amax=260, bbox_max=50, emin=2.5):
     """arr: HxWx3 uint8 RGB. Returns list of arrow dicts."""
     if area not in GEOREF: raise ValueError(f"No georeference for '{area}'.")
@@ -140,7 +165,8 @@ def extract_image(arr, area, amin=8, amax=260, bbox_max=50, emin=2.5):
             hx,hy=_axis_head(ys,xs); cx,cy=float(xs.mean()),float(ys.mean())
             out.append(dict(px=cx,py=cy,lat=float(p2lat(cy)),lon=float(p2lon(cx)),
                             speed=SPEED[c],dir=_bearing(hx,hy),n=len(xs)))
-    out=_resolve_heads(out)
+    out=out+_merged_cells(arr,area,amax=amax)     # fill merged fast-channel clumps
+    out=_resolve_heads(out)                        # orient small + merged cells vs neighbours
     if area in CALM_OUTLINE_AREAS:                 # add background-colour 0-0.5 arrows (EBA)
         out=out+_outline_calm(arr,area,out)
     return out

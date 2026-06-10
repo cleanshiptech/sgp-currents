@@ -50,8 +50,10 @@ Writes `data/SSP_20260615.json`. The workflow commits these to the `data` branch
 ## Caveats
 - Speed binned to 0.5 kn; the series shows the bin midpoint ±0.25 kn. Exact per-station
   numbers stay in the spreadsheet (overlaid as a dashed line near known stations).
-- Arrows under MPA's drawn station markers read poorly; merged fast-channel arrows are
-  under-recovered (anchorages are clean).
+- Arrows under MPA's drawn station markers read poorly. Fast-channel arrows that merge
+  into an over-size blob on strong tides are recovered by `_merged_cells` (the clump is
+  tiled into band-coloured cells with the channel's flow direction), so the strait's
+  strongest current no longer reads as a blank.
 - **"No reading" ≠ calm.** Unrecovered cells render as a faint grey scaffold, NOT as
   "calm": a blank cell may be genuinely slack OR a 0.5–2 kn arrow we failed to digitise
   (white 0–0.5 merges with the sea-fill; short slow arrows fall below detection). Recovery
