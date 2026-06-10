@@ -78,7 +78,7 @@ def _fast_fill(frames, cm, anchors, S=SP):
         d,_ = cKDTree(anchors).query(cand); cand = cand[d>18]
     return cand.astype(float)
 
-def build_grid(frames, cm, area, dedup=14, union_max=16, per=None):
+def build_grid(frames, cm, area, dedup=17, union_max=16, per=None):
     """Complete fixed grid = the union of per-frame detections (so every cell active at any
     tide state is present, incl. the merged fast channel via extract_image's tiling), plus a
     lattice fill of the persistent fast region, deduplicated at `dedup` px. Seeded densest-
@@ -147,11 +147,14 @@ def extract_frame(arr, cm, grid, area, ref=None):
     if ref is None: ref=ex.extract_image(arr,area)
     if ref:
         rxy=np.array([[a["px"],a["py"]] for a in ref]); rdir=np.array([a["dir"] for a in ref])
-        tree=cKDTree(rxy)
+        rsp=np.array([a["speed"] for a in ref]); tree=cKDTree(rxy)
     out=[]
     for i,(cx,cy) in enumerate(grid):
         s=sample_cell(arr,cm,cx,cy)                       # change-masked -> static features excluded
         if not s: continue
-        dv=float(rdir[tree.query([cx,cy])[1]]) if ref else 0.0
-        out.append((i, s["speed"], dv))
+        dd,j=(tree.query([cx,cy]) if ref else (1e9,0))
+        # blue is reliable only when the size-gated detector also sees it there; otherwise the
+        # cell-read picked up a dynamic depth-sounding -> drop (no phantom 2-2.5 reds).
+        if abs(s["speed"]-2.25)<0.1 and not (ref and dd<=20 and abs(rsp[j]-2.25)<0.1): continue
+        out.append((i, s["speed"], float(rdir[j]) if ref else 0.0))
     return out
