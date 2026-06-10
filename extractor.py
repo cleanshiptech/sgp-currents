@@ -128,13 +128,19 @@ def _merged_cells(arr, area, step=30, amax=260, bbmin=28, bbmax=1000, smin=1.0, 
     (band speed + the clump's principal-axis direction; head sign resolved later vs
     neighbours). Restricted to >=1 kn bands so the white/yellow sea-fill can't qualify, and
     to a bbox window that excludes the compact legend swatches and the huge background."""
+    # Blue (2.0-2.5, 0,64,128) is recovered HERE, not in the single pass: its real arrows are
+    # fast -> they merge into large clumps, while the depth soundings that share its exact RGB
+    # are tiny (<=11px). A clean size gap (~60-200px empty) separates them, so a 60px floor
+    # keeps real blue clumps and drops every sounding.
+    BLUE=(0,64,128); SP={**SPEED, BLUE:2.25}
     p2lon,p2lat,_,_=georef_funcs(area); out=[]
-    for c in FILL:
-        if SPEED[c]<smin: continue
+    for c in FILL+[BLUE]:
+        if SP[c]<smin: continue
+        floor = 60 if c==BLUE else amax       # blue merges at ~60+; FILL bands at >amax
         m=np.all(arr==np.array(c),axis=2); lbl,n=ndimage.label(m); objs=ndimage.find_objects(lbl)
         for k in range(1,n+1):
             sl=objs[k-1]; ys,xs=np.where(lbl[sl]==k)
-            if len(xs)<=amax: continue
+            if len(xs)<=floor: continue
             H=ys.max()-ys.min()+1; W=xs.max()-xs.min()+1
             if not(bbmin<max(H,W)<bbmax): continue
             if len(xs)/(H*W)>maxfill: continue     # solid block = legend swatch, not an arrow clump
@@ -144,7 +150,7 @@ def _merged_cells(arr, area, step=30, amax=260, bbmin=28, bbmax=1000, smin=1.0, 
             br=_bearing(math.cos(th),math.sin(th))
             for px,py in {(int(round(a/step)*step),int(round(b/step)*step)) for a,b in zip(xs,ys)}:
                 out.append(dict(px=float(px),py=float(py),lat=float(p2lat(py)),lon=float(p2lon(px)),
-                                speed=SPEED[c],dir=br,n=0))
+                                speed=SP[c],dir=br,n=0))
     return out
 
 # amin=8 recovers the smallest slow-current arrows (white 0-0.5, short yellow 0.5-1).
