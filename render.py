@@ -8,18 +8,21 @@ import extractor as ex
 W,H=1673,896; CELL=17; SS=3   # half-cell px; supersample factor for anti-aliasing
 # arrow glyph pointing +x: triangular head + rectangular shaft (cleaner than a flat chevron)
 DART=[(10,0),(2,-6),(2,-2.4),(-9,-2.4),(-9,2.4),(2,2.4),(2,6)]
-CALM=ex.NO_READING+(70,)       # faint grey scaffold for cells with no recovered arrow
+# A grid cell with no detected arrow can only be <=0.5 kn: every band >=0.5 is validated at
+# ~100% recall, so by elimination it's calm (too weak to resolve a direction). Show it as the
+# 0-0.5 band, no dart -- not "no reading".
+CALM=ex.band_color(0.25)+(80,)
 
 def _rot(pts,ang,cx,cy,s):
     c,si=math.cos(ang),math.sin(ang)
     return [((cx+(x*c-y*si)*s), (cy+(x*si+y*c)*s)) for x,y in pts]
 
 def _overlay(items, cell_alpha=140, icon=(28,31,38)):
-    """items: (px,py,speed,deg). speed=None -> faint grey 'no reading' cell (no dart);
-    any real speed (incl. 0-0.5) -> band-coloured fill plus a haloed direction arrow."""
+    """items: (px,py,speed,deg). speed=None -> <=0.5 kn calm cell (no dart, current too weak
+    for a direction); any real speed -> band-coloured fill plus a haloed direction arrow."""
     big=Image.new("RGBA",(W*SS,H*SS),(0,0,0,0)); d=ImageDraw.Draw(big)
     cell=lambda x,y,f: d.rectangle([x-CELL*SS,y-CELL*SS,x+CELL*SS,y+CELL*SS],fill=f)
-    for px,py,speed,deg in items:                 # no-reading scaffold first
+    for px,py,speed,deg in items:                 # calm (<=0.5) cells first, no dart
         if speed is None: cell(px*SS,py*SS,CALM)
     for px,py,speed,deg in items:                 # measured cells on top
         if speed is not None: cell(px*SS,py*SS,ex.band_color(speed)+(cell_alpha,))

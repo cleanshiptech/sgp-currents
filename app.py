@@ -72,7 +72,7 @@ with left:
         overlays=[(R.gridded_frame_overlay(dd["frames"],ti),dd["bounds"]) for _,dd in loaded if ti in dd["frames"]]
         cap=f"{area} {day} {ti} · {tcount(ti)} arrows"
         if daymax and tcount(ti)<0.25*daymax:
-            st.info("⚓ **Slack water** — few readable arrows (currents near zero); most cells are 'no reading'. Slide to a flood/ebb time for the working current.")
+            st.info("⚓ **Slack water** — currents near zero, so most cells are calm (≤0.5 kn) with no direction. Slide to a flood/ebb time for the working current.")
     else:
         stat="max" if "max" in view else "mean"
         overlays=[(R.aggregate_overlay(dd["frames"],stat),dd["bounds"]) for _,dd in loaded]
@@ -89,9 +89,10 @@ with left:
     # 6-band legend (dark text on light swatches, light on dark — stays readable)
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
     def _chip(rgb,lab): return f"<span style='background:rgb{rgb};padding:2px 8px;margin:2px;color:{_txt(rgb)};border:1px solid #cbd2d9;border-radius:3px'>{lab}</span>"
-    chips="".join(_chip(ex.DISPLAY_BANDS[i][1],ex.DISPLAY_LABELS[i]) for i in range(6))+_chip(ex.NO_READING,"no reading")
+    chips="".join(_chip(ex.DISPLAY_BANDS[i][1],ex.DISPLAY_LABELS[i]) for i in range(6))
     st.markdown("**Speed (kn):** "+chips,unsafe_allow_html=True)
-    st.caption("Grey 'no reading' = no arrow recovered there: could be calm OR a current we couldn't digitise — **don't assume calm**. Coverage is best at peak flood/ebb.")
+    st.caption("Cells without an arrow are **≤0.5 kn (calm)** — too weak to resolve a direction. "
+               "All currents ≥0.5 kn are detected, so a calm cell isn't hiding stronger flow.")
 
 with right:
     st.subheader("Current at point")
