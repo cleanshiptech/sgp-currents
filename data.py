@@ -43,7 +43,21 @@ def build(area, day, fetcher=F.fetch_bytes, progress=None):
         for ci,speed,direc in G.extract_frame(raw[h],cm,gridc,area,ref=per[i]):
             sp[ci]=b2i.get(round(speed,2),0); di[ci]=int(round(direc))%360
         frames[h]={"s":sp,"d":di}
+    _despike(frames, slots, N)   # drop isolated high-speed spikes (peak-tide chart annotations)
     return dict(area=area,date=day,bounds=bounds(area),grid=glist,frames=frames,missing=missing)
+
+def _despike(frames, slots, N, hi=6, jump=3):
+    """The fixed grid gives each cell a time-series. Real fast current ramps smoothly across
+    the 30-min frames; a chart annotation (e.g. a peak-tide direction arrow that shares the
+    fast-band colour) shows up as an isolated high-speed spike at a normally-calm cell. Drop
+    any high band (>=`hi`, ~>=2.75 kn) that exceeds BOTH temporal neighbours by >=`jump` bands."""
+    S=np.array([frames[h]["s"] for h in slots])          # (T, N) band indices
+    T=len(slots)
+    for t in range(T):
+        lo=S[t-1] if t>0 else np.zeros(N,int); up=S[t+1] if t<T-1 else np.zeros(N,int)
+        spike=(S[t]>=hi) & ((S[t]-np.maximum(lo,up))>=jump)
+        for ci in np.nonzero(spike)[0]:
+            frames[slots[t]]["s"][ci]=0; frames[slots[t]]["d"][ci]=0
 
 # ---- app-side loading ----
 def _expand(dd, area):

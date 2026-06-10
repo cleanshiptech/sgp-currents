@@ -92,8 +92,9 @@ def build_grid(frames, cm, area, dedup=14, union_max=16, per=None):
         pe = {f: ex.extract_image(frames[f], area) for f in idx}
         order = sorted(idx, key=lambda f: -len(pe[f]))
         pts = [(d["px"], d["py"]) for f in order for d in pe[f]]
-    ff = _fast_fill(frames, cm, np.array(pts) if pts else np.zeros((0,2)))
-    pts += [(float(x), float(y)) for x, y in ff]
+    # NB: no lattice "fast fill" — the extract_image union already covers the merged channel
+    # (via its gated merged-tiling), and a raw fast-colour fill drops false cells onto solid
+    # non-arrow chart features (e.g. dark-maroon blobs) -> phantom high-speed reds.
     cells=[]; hsh={}; D2=dedup*dedup; b=dedup                    # greedy spatial-hash dedup, O(n)
     for x,y in pts:
         gx,gy=int(x//b),int(y//b); near=False
@@ -125,7 +126,8 @@ def sample_cell(arr, cm, cx, cy, rb=16):
         return best
     solid=np.zeros(pb.shape[:2],bool)
     for c in SOLID: solid |= np.all(pb==np.array(c),axis=2)
-    b=nearest(solid)
+    solid &= pmb                                             # change-mask: static chart features
+    b=nearest(solid)                                         # (route/direction arrows) are excluded
     if b is None:                                            # no clear arrow -> try white/blue
         amb=np.zeros(pb.shape[:2],bool)
         for c in AMBIG: amb |= np.all(pb==np.array(c),axis=2) & pmb
@@ -148,7 +150,7 @@ def extract_frame(arr, cm, grid, area, ref=None):
         tree=cKDTree(rxy)
     out=[]
     for i,(cx,cy) in enumerate(grid):
-        s=sample_cell(arr,cm,cx,cy)
+        s=sample_cell(arr,cm,cx,cy)                       # change-masked -> static features excluded
         if not s: continue
         dv=float(rdir[tree.query([cx,cy])[1]]) if ref else 0.0
         out.append((i, s["speed"], dv))
