@@ -22,8 +22,12 @@ def _overlay(items, cell_alpha=140, icon=(28,31,38)):
     for a direction); any real speed -> band-coloured fill plus a haloed direction arrow."""
     big=Image.new("RGBA",(W*SS,H*SS),(0,0,0,0)); d=ImageDraw.Draw(big)
     cell=lambda x,y,f: d.rectangle([x-CELL*SS,y-CELL*SS,x+CELL*SS,y+CELL*SS],fill=f)
-    for px,py,speed,deg in items:                 # calm (<=0.5) cells first, no dart
-        if speed is None: cell(px*SS,py*SS,CALM)
+    rd=int(2.3*SS)                                 # calm-cell dot radius
+    for px,py,speed,deg in items:                 # calm (<=0.5) cells: faint fill + a small dot
+        if speed is None:
+            x,y=px*SS,py*SS; cell(x,y,CALM)
+            d.ellipse([x-rd-SS,y-rd-SS,x+rd+SS,y+rd+SS],fill=(255,255,255,200))   # halo
+            d.ellipse([x-rd,y-rd,x+rd,y+rd],fill=icon+(255,))                     # dot (= dart colour)
     for px,py,speed,deg in items:                 # measured cells on top
         if speed is not None: cell(px*SS,py*SS,ex.band_color(speed)+(cell_alpha,))
     for px,py,speed,deg in items:                 # darts for every measured cell
