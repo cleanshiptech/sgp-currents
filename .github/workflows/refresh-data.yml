@@ -28,16 +28,18 @@ jobs:
             git worktree add -b data ../pub; (cd ../pub && git rm -rfq . || true)
           fi
           mkdir -p ../pub/data
-      - name: Build the current month (+ next month when MPA publishes it)
+      - name: Build current month into the data branch (per-day commits, resumable)
         env:
           FORCE: ${{ inputs.force && '1' || '0' }}
         run: |
           python - <<'PY'
-          import datetime, os, json, calendar, requests
+          import datetime, os, json, calendar, subprocess, requests
           import data as D, fetch as F
           PUB="../pub/data"; os.makedirs(PUB, exist_ok=True)
           S=requests.Session(); force=os.environ.get("FORCE")=="1"
           sgt=datetime.datetime.utcnow()+datetime.timedelta(hours=8)
+          def git(*a): subprocess.run(["git","-C","../pub",*a],check=True)
+          git("config","user.name","tidal-bot"); git("config","user.email","bot@users.noreply.github.com")
           def avail(d):                       # does MPA have a frame for this day yet?
               try: return F.fetch_bytes("SSP", d.strftime("%Y%m%d"), "1200", S) is not None
               except Exception: return False
@@ -54,13 +56,10 @@ jobs:
                   if not avail(day): continue                     # MPA has no frames yet
                   d=D.build(area, ds)
                   if not d["frames"]: continue
-                  json.dump(d, open(fn,"w")); built+=1
-                  print(f"built {area} {ds}: {len(d['frames'])}/48", flush=True)
+                  json.dump(d, open(fn,"w"))
+                  git("add", f"data/{area}_{ds}.json")            # commit+push each day so a
+                  if subprocess.run(["git","-C","../pub","commit","-m",f"data: {area} {ds}"]).returncode==0:
+                      git("push","origin","HEAD:data"); built+=1   # long build can't lose progress
+                      print(f"built+pushed {area} {ds}: {len(d['frames'])}/48", flush=True)
           print(f"done; {built} day-file(s) built (force={force})")
           PY
-      - name: Commit & push to the data branch
-        run: |
-          cd ../pub
-          git add -A data
-          git commit -m "data refresh $(date -u +%F)" || { echo "no changes"; exit 0; }
-          git push origin data
