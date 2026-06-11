@@ -1,7 +1,7 @@
 """MPA Current Time-Series (online). Pick a point -> current through the day.
 No disk cache: reads CI-precomputed JSON (repo 'data' branch via raw URL) and falls
 back to in-memory live fetch. Speed = 6-band filled grid; direction = arrows."""
-import os, math, datetime as dt
+import os, math, json, datetime as dt
 import numpy as np, pandas as pd, streamlit as st
 import altair as alt, folium
 from streamlit_folium import st_folium
@@ -25,6 +25,84 @@ def nearest_station(lat,lon):
         d=math.hypot((la-lat)*110.6,(lo-lon)*111.3*math.cos(math.radians(lat)))
         if best is None or d<best[0]: best=(d,n)
     return best
+
+# ---- TV kiosk mode: ?kiosk=1 -> chrome-free, auto-looping today→+6-day animation ----
+_KIOSK_HTML = """<!doctype html><html><head>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+ html,body{margin:0;height:100%;background:#eef1f3;font-family:system-ui,Arial,sans-serif}
+ #map{position:absolute;inset:0}
+ .ov{position:absolute;z-index:1000;background:rgba(255,255,255,.92);border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+ #clock{top:16px;left:16px;padding:10px 20px;font-size:34px;font-weight:700;color:#16324f}
+ #title{top:16px;right:16px;padding:10px 18px;font-size:18px;color:#fff;background:rgba(22,50,79,.92)}
+ #legend{bottom:16px;left:16px;padding:8px 12px;font-size:16px}
+ #legend b{margin-right:6px}
+ #legend span{padding:3px 9px;margin:2px;border-radius:4px;border:1px solid #cbd2d9;display:inline-block}
+ #bar{position:absolute;bottom:0;left:0;height:6px;background:#2e8b57;z-index:1001;transition:width .25s linear}
+</style></head><body>
+<div id="map"></div>
+<div id="clock" class="ov">--</div>
+<div id="title" class="ov">SGP Currents &middot; 7-day loop</div>
+<div id="legend" class="ov"><b>kn:</b> __LEGEND__</div>
+<div id="bar"></div>
+<script>
+var D=__PAYLOAD__;
+var BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+var map=L.map('map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,boxZoom:false,keyboard:false,touchZoom:false,tap:false});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
+map.fitBounds([D.sw,D.ne]);
+var ssp=D.sspb?L.imageOverlay(BLANK,[D.sspb.sw,D.sspb.ne],{opacity:.92}).addTo(map):null;
+var eba=D.ebab?L.imageOverlay(BLANK,[D.ebab.sw,D.ebab.ne],{opacity:.92}).addTo(map):null;
+var i=0,n=D.frames.length;
+function show(){var f=D.frames[i];
+ if(ssp)ssp.setUrl(f.ssp||BLANK);
+ if(eba)eba.setUrl(f.eba||BLANK);
+ document.getElementById('clock').textContent=f.label;
+ document.getElementById('bar').style.width=((i+1)/n*100)+'%';
+ i=(i+1)%n;}
+show();setInterval(show,Math.round(1000/D.fps));
+setTimeout(function(){location.reload();},3*3600*1000);
+</script></body></html>"""
+
+@st.cache_data(show_spinner="Building 7-day loop…", ttl=10800)   # cache 3h; JS reloads to roll the window
+def _kiosk_frames(days_tuple, step, remote):
+    out=[]; sspb=ebab=None
+    for ds in days_tuple:
+        dssp=get_precomputed("SSP",ds,remote); deba=get_precomputed("EBA",ds,remote)
+        hs=(dssp or {}).get("frames",{}); he=(deba or {}).get("frames",{})
+        if not hs and not he: continue
+        if dssp: sspb=dssp["bounds"]
+        if deba: ebab=deba["bounds"]
+        for ti in sorted(set(hs)|set(he))[::step]:
+            su=R.kiosk_uri(R.frame_overlay(hs[ti])) if ti in hs else None
+            eu=R.kiosk_uri(R.frame_overlay(he[ti])) if ti in he else None
+            if su or eu:
+                out.append({"label":f"{dt.datetime.strptime(ds,'%Y%m%d'):%a %d %b}  {ti[:2]}:{ti[2:]}","ssp":su,"eba":eu})
+    return out,sspb,ebab
+
+def _render_kiosk(qp):
+    from streamlit.components.v1 import html as _html
+    days=int(qp.get("days",7)); step=int(qp.get("step",2)); fps=float(qp.get("fps",4)); H=int(qp.get("h",1040))
+    remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
+    today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
+    days_tuple=tuple((today+dt.timedelta(days=i)).strftime("%Y%m%d") for i in range(days))
+    st.markdown("<style>#MainMenu,header,footer{display:none!important}.block-container{padding:0!important;max-width:100%!important}</style>",unsafe_allow_html=True)
+    frames,sspb,ebab=_kiosk_frames(days_tuple,step,remote)
+    if not frames: st.error("No data archived yet for the next 7 days."); return
+    sws=[b["sw"] for b in (sspb,ebab) if b]; nes=[b["ne"] for b in (sspb,ebab) if b]
+    sw=[min(s[0] for s in sws),min(s[1] for s in sws)]; ne=[max(n[0] for n in nes),max(n[1] for n in nes)]
+    def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
+    legend="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};color:{_txt(ex.DISPLAY_BANDS[i][1])}'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
+    payload=json.dumps({"frames":frames,"sspb":sspb,"ebab":ebab,"sw":sw,"ne":ne,"fps":fps})
+    _html(_KIOSK_HTML.replace("__PAYLOAD__",payload).replace("__LEGEND__",legend),height=H,scrolling=False)
+
+def _qp():
+    try: return {k:(v[-1] if isinstance(v,list) else v) for k,v in dict(st.query_params).items()}
+    except Exception: return {k:(v[0] if isinstance(v,list) else v) for k,v in st.experimental_get_query_params().items()}
+
+if str(_qp().get("kiosk",""))=="1":
+    _render_kiosk(_qp()); st.stop()
 
 with st.sidebar:
     st.header("Data")

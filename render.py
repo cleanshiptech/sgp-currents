@@ -95,5 +95,16 @@ def point_series(frames, lat, lon, max_km=1.0):
         if r: rows.append((hhmm,r["speed"],r["dir"],r["dist_km"]))
     return rows
 
-def png_data_uri(im):
-    b=io.BytesIO(); im.save(b,"PNG"); return "data:image/png;base64,"+base64.b64encode(b.getvalue()).decode()
+def png_data_uri(im, max_w=None, optimize=False):
+    if max_w and im.width>max_w:
+        im=im.resize((max_w, round(im.height*max_w/im.width)), Image.LANCZOS)
+    b=io.BytesIO(); im.save(b,"PNG",optimize=optimize)
+    return "data:image/png;base64,"+base64.b64encode(b.getvalue()).decode()
+
+def kiosk_uri(im, max_w=680, colors=32):
+    """Tiny palette-PNG data URI for the TV loop: ~40KB vs ~700KB, per-pixel alpha preserved
+    (basemap shows through empty cells), so hundreds of frames embed without bloating the page."""
+    if im.width>max_w: im=im.resize((max_w, round(im.height*max_w/im.width)), Image.LANCZOS)
+    q=im.convert("RGBA").quantize(colors=colors, method=Image.FASTOCTREE)
+    b=io.BytesIO(); q.save(b,"PNG",optimize=True)
+    return "data:image/png;base64,"+base64.b64encode(b.getvalue()).decode()
