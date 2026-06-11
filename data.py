@@ -87,5 +87,19 @@ def load_precomputed(area, day, remote_base=None, local_dir="data"):
     if dd is None: return None
     return _expand(dd,area) if "grid" in dd else dd   # expand compact; pass through legacy
 
+def load_compact(area, day, remote_base=None, local_dir="data"):
+    """Raw compact dict (grid + per-cell band/dir series), unexpanded -- for the anchorage
+    planner which reads each cell's time-series directly. Returns None if absent/legacy."""
+    fn=f"{area}_{day}.json"; dd=None
+    p=os.path.join(local_dir,fn)
+    if os.path.isfile(p):
+        dd=json.load(open(p))
+    elif remote_base:
+        try:
+            r=requests.get(remote_base.rstrip("/")+"/"+fn,timeout=20)
+            if r.status_code==200 and r.text.strip().startswith("{"): dd=r.json()
+        except Exception: dd=None
+    return dd if (dd and "grid" in dd) else None
+
 def build_live(area, day, progress=None):
     return build(area, day, progress=progress)

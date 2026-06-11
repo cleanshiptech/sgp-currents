@@ -5,7 +5,7 @@ import os, math, json, datetime as dt
 import numpy as np, pandas as pd, streamlit as st
 import altair as alt, folium
 from streamlit_folium import st_folium
-import extractor as ex, render as R, data as D
+import extractor as ex, render as R, data as D, grid as G
 
 st.set_page_config(page_title="MPA Current Time-Series", layout="wide")
 STATIONS={"SSP-A":(1.1963,103.6815),"SSP-B":(1.1893,103.6934),"SSP-C":(1.1818,103.7032),
@@ -122,28 +122,138 @@ def _qp():
 if str(_qp().get("kiosk",""))=="1":
     _render_kiosk(_qp()); st.stop()
 
+# ---- Anchorage planner: ETA -> 48h per-anchorage current, ranked by hours below threshold ----
+def _pip(poly, lat, lon):                      # vectorised ray-casting point-in-polygon
+    vy=np.array([p[0] for p in poly]); vx=np.array([p[1] for p in poly]); n=len(poly)
+    ins=np.zeros(len(lat),bool); j=n-1
+    for i in range(n):
+        c=((vy[i]>lat)!=(vy[j]>lat)) & (lon < (vx[j]-vx[i])*(lat-vy[i])/((vy[j]-vy[i])+1e-12)+vx[i])
+        ins^=c; j=i
+    return ins
+
+@st.cache_data(show_spinner="Computing anchorage currents…", ttl=3600)
+def plan_series(eta_iso, hours, aggmode, remote):
+    """For each anchorage, the aggregated (mean/max) current at each 30-min step over the window.
+    Returns (series{code:[kn|None]}, step_iso[], approx{code:True}). Cells inside each polygon;
+    anchorages smaller than the grid fall back to the nearest cell (flagged approx)."""
+    start=dt.datetime.fromisoformat(eta_iso)
+    steps=[start+dt.timedelta(minutes=30*k) for k in range(int(hours)*2)]
+    days=sorted({s.strftime("%Y%m%d") for s in steps})
+    cent={a["code"]:(float(np.mean([p[0] for p in a["poly"]])),float(np.mean([p[1] for p in a["poly"]]))) for a in ANCH}
+    grids={}
+    for area in ("SSP","EBA"):
+        for day in days:
+            dd=D.load_compact(area,day,remote)
+            if not dd or not dd.get("grid"): continue
+            g=np.array(dd["grid"],float); p2lon,p2lat,_,_=ex.georef_funcs(area)
+            clat=np.array([p2lat(y) for y in g[:,1]]); clon=np.array([p2lon(x) for x in g[:,0]])
+            idx={a["code"]:np.where(_pip(a["poly"],clat,clon))[0].tolist() for a in ANCH}
+            grids[(area,day)]=(dd,idx,clat,clon)
+    if not grids: return {},[],{}
+    approx={}
+    for a in ANCH:                              # nearest-cell fallback for tiny anchorages
+        c=a["code"]
+        if any(grids[k][1][c] for k in grids): continue
+        cy,cx=cent[c]; best=None
+        for (area,day),(dd,idx,clat,clon) in grids.items():
+            d2=(clat-cy)**2+(clon-cx)**2; mi=int(d2.argmin())
+            if best is None or d2[mi]<best[0]: best=(d2[mi],area)
+        if best:
+            home=best[1]
+            for (area,day),(dd,idx,clat,clon) in grids.items():
+                if area==home: idx[c]=[int(((clat-cy)**2+(clon-cx)**2).argmin())]
+            approx[c]=True
+    series={a["code"]:[] for a in ANCH}
+    for s in steps:
+        day=s.strftime("%Y%m%d"); hhmm=s.strftime("%H%M")
+        for code in series:
+            sp=[]
+            for area in ("SSP","EBA"):
+                k=(area,day)
+                if k not in grids: continue
+                dd,idx,_,_=grids[k]; fr=dd["frames"].get(hhmm)
+                if not fr: continue
+                for ci in idx[code]:
+                    b=fr["s"][ci]; sp.append(G.BAND_MIDS[b-1] if b>0 else 0.25)
+            series[code].append(round(float(np.mean(sp) if aggmode=="mean" else max(sp)),3) if sp else None)
+    return series,[s.isoformat() for s in steps],approx
+
+def _render_planner(eta_d, eta_h, win, thr, aggmode, remote):
+    st.subheader("⚓ Anchorage planner")
+    if not ANCH: st.error("No anchorage data loaded."); return
+    eta=dt.datetime.combine(eta_d,dt.time(int(eta_h)))
+    am="max" if "worst" in aggmode else "mean"
+    series,steps_iso,approx=plan_series(eta.isoformat(),int(win),am,remote)
+    if not steps_iso or not any(any(v is not None for v in s) for s in series.values()):
+        st.warning("No archived current data for that window yet. The forecast archive covers the "
+                   "current month (and next once MPA publishes it) — try an ETA within that range."); return
+    steps=[dt.datetime.fromisoformat(t) for t in steps_iso]; nmap={a["code"]:a["name"] for a in ANCH}
+    rows=[]
+    for code,s in series.items():
+        av=[v for v in s if v is not None]
+        if not av: continue
+        hrs=0.5*sum(1 for v in av if v<thr)
+        rows.append((hrs,max(av),code))
+    rows.sort(key=lambda r:(-r[0],r[1]))
+    st.caption(f"ETA **{eta:%a %d %b %Y %H:%M}** SGT → **{win} h** window. Ranked by hours the "
+               f"**{aggmode}** current stays below **{thr:.1f} kn**.  ~ = anchorage smaller than the grid (nearest-cell estimate).")
+    if rows:
+        h0,pk0,c0=rows[0]
+        st.success(f"Most attractive: **{nmap[c0]}** ({c0}) — **{h0:.1f} h** ({h0/win:.0%}) below {thr:.1f} kn, peak {pk0:.2f} kn.")
+    df=pd.DataFrame([{"#":i+1,"Anchorage":nmap[c]+(" ~" if approx.get(c) else ""),"Code":c,
+                      f"Hrs <{thr:.1f}kn":round(h,1),"% of window":round(100*h/win),"Peak kn":round(pk,2)}
+                     for i,(h,pk,c) in enumerate(rows)])
+    st.dataframe(df,hide_index=True,use_container_width=True)
+    st.download_button("Download ranking (CSV)",df.to_csv(index=False).encode(),
+                       f"anchorage_plan_{eta:%Y%m%d_%H%M}.csv","text/csv")
+    long=[{"Anchorage":nmap[c],"t":t,"kn":v} for c,s in series.items() for t,v in zip(steps,s) if v is not None]
+    if long:
+        L=pd.DataFrame(long); order=[nmap[c] for *_,c in rows]
+        hm=alt.Chart(L).mark_rect().encode(
+            x=alt.X("t:T",title="SGT (48h from ETA)"),
+            y=alt.Y("Anchorage:N",sort=order,title=None),
+            color=alt.Color("kn:Q",title="kn",scale=alt.Scale(domain=[0,thr,3.0],range=["#2c7bb6","#ffffbf","#d7191c"])),
+            tooltip=[alt.Tooltip("Anchorage:N"),alt.Tooltip("t:T",format="%a %H:%M"),alt.Tooltip("kn:Q")]
+        ).properties(height=max(220,18*len(rows)))
+        st.caption("Blue = calm, red = above threshold. Each row is an anchorage; left→right is the 48h from ETA.")
+        st.altair_chart(hm,use_container_width=True)
+
 with st.sidebar:
-    st.header("Data")
-    area="SSP + EBA"; sel_areas=["SSP","EBA"]   # combined view only
+    st.header("SGP Currents")
     sgt_today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
-    date=st.date_input("Date",sgt_today,
-                       min_value=sgt_today-dt.timedelta(days=40),
-                       max_value=sgt_today+dt.timedelta(days=62))
-    day=date.strftime("%Y%m%d")
     remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""    # config, not UI
     xlsx=st.secrets.get("MPA_XLSX","") if hasattr(st,"secrets") else ""
-    loaded=[(a,dd) for a in sel_areas if (dd:=get_precomputed(a,day,remote)) and dd.get("frames")]
-    if loaded:
-        st.caption(f"✓ {date:%a %d %b %Y} · SSP + EBA")
-    else:
-        st.warning(f"No data for **{date:%d %b %Y}** yet. The archive covers the current month "
-                   f"(it updates automatically) — try a date in {sgt_today:%B}.")
-    if st.button("↻ Refresh"): get_precomputed.clear(); st.rerun()
+    mode=st.radio("Mode",["Live map","Anchorage planner"]) if ANCH else "Live map"
     st.markdown("---")
-    basemap=st.selectbox("Basemap",list(TILES))
-    view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
-    opacity=st.slider("Overlay opacity",0.3,1.0,0.85)
-    show_anch=st.checkbox(f"Anchorage areas ({len(ANCH)})",value=True) if ANCH else False
+    if mode=="Anchorage planner":
+        eta_d=st.date_input("Vessel ETA (date)",sgt_today,
+                            min_value=sgt_today-dt.timedelta(days=7),
+                            max_value=sgt_today+dt.timedelta(days=55))
+        eta_h=st.slider("ETA hour (SGT)",0,23,0)
+        win=st.select_slider("Window (hours)",[24,48,72],value=48)
+        thr=st.slider("Calm threshold (kn)",0.5,3.0,1.5,0.5)
+        aggmode=st.radio("Per-anchorage current",["typical (mean)","worst-case (max)"])
+    else:
+        area="SSP + EBA"; sel_areas=["SSP","EBA"]   # combined view only
+        date=st.date_input("Date",sgt_today,
+                           min_value=sgt_today-dt.timedelta(days=40),
+                           max_value=sgt_today+dt.timedelta(days=62))
+        day=date.strftime("%Y%m%d")
+        loaded=[(a,dd) for a in sel_areas if (dd:=get_precomputed(a,day,remote)) and dd.get("frames")]
+        if loaded:
+            st.caption(f"✓ {date:%a %d %b %Y} · SSP + EBA")
+        else:
+            st.warning(f"No data for **{date:%d %b %Y}** yet. The archive covers the current month "
+                       f"(it updates automatically) — try a date in {sgt_today:%B}.")
+        if st.button("↻ Refresh"): get_precomputed.clear(); st.rerun()
+        st.markdown("---")
+        basemap=st.selectbox("Basemap",list(TILES))
+        view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
+        opacity=st.slider("Overlay opacity",0.3,1.0,0.85)
+        show_anch=st.checkbox(f"Anchorage areas ({len(ANCH)})",value=True) if ANCH else False
+
+if mode=="Anchorage planner":
+    _render_planner(eta_d,eta_h,win,thr,aggmode,remote); st.stop()
 
 if not loaded:
     st.title("MPA Current Time-Series")
