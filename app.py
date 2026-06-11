@@ -19,6 +19,13 @@ TILES={"Carto Positron":("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y
 @st.cache_data(show_spinner=False, ttl=3600)   # re-check repo hourly for fresh CI data
 def get_precomputed(area,day,remote): return D.load_precomputed(area,day,remote_base=remote)
 
+@st.cache_data(show_spinner=False)             # MPA designated anchorages (Port Regs, 2nd Schedule)
+def load_anchorages():
+    p=os.path.join(os.path.dirname(os.path.abspath(__file__)),"anchorages.json")
+    try: return json.load(open(p))
+    except Exception: return []
+ANCH=load_anchorages()
+
 def nearest_station(lat,lon):
     best=None
     for n,(la,lo) in STATIONS.items():
@@ -40,6 +47,7 @@ _KIOSK_HTML = """<!doctype html><html><head>
  #legend span{padding:3px 10px;margin:2px;border-radius:4px;font-weight:600;display:inline-block}
  #title{font-size:16px;opacity:.85;white-space:nowrap}
  #map{position:absolute;top:58px;left:0;right:0;bottom:0}
+ .anchlbl{background:none!important;border:0!important;box-shadow:none!important;color:#1b1c66;font-weight:700;font-size:11px;text-shadow:0 0 3px #fff,0 0 3px #fff}
  #bar{position:absolute;bottom:0;left:0;height:5px;background:#2e8b57;z-index:1001;transition:width .25s linear}
 </style></head><body>
 <div id="top">
@@ -56,6 +64,8 @@ var map=L.map('map',{zoomControl:false,attributionControl:false,dragging:false,s
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
 var ssp=D.sspb?L.imageOverlay(BLANK,[D.sspb.sw,D.sspb.ne],{opacity:.92}).addTo(map):null;
 var eba=D.ebab?L.imageOverlay(BLANK,[D.ebab.sw,D.ebab.ne],{opacity:.92}).addTo(map):null;
+(D.anch||[]).forEach(function(a){L.polygon(a.poly,{color:'#1b1c66',weight:1.3,fill:false,opacity:.6})
+ .addTo(map).bindTooltip(a.code,{permanent:true,direction:'center',className:'anchlbl'});});
 function fit(){map.invalidateSize();map.fitBounds([D.sw,D.ne],{padding:[28,28]});}
 fit();setTimeout(fit,400);setTimeout(fit,1200);window.addEventListener('resize',fit);
 var i=0,n=D.frames.length;
@@ -102,7 +112,7 @@ def _render_kiosk(qp):
     sw=[min(s[0] for s in sws),min(s[1] for s in sws)]; ne=[max(n[0] for n in nes),max(n[1] for n in nes)]
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
     legend="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};color:{_txt(ex.DISPLAY_BANDS[i][1])}'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
-    payload=json.dumps({"frames":frames,"sspb":sspb,"ebab":ebab,"sw":sw,"ne":ne,"fps":fps})
+    payload=json.dumps({"frames":frames,"sspb":sspb,"ebab":ebab,"sw":sw,"ne":ne,"fps":fps,"anch":ANCH})
     _html(_KIOSK_HTML.replace("__PAYLOAD__",payload).replace("__LEGEND__",legend),height=H,scrolling=False)
 
 def _qp():
@@ -133,6 +143,7 @@ with st.sidebar:
     basemap=st.selectbox("Basemap",list(TILES))
     view=st.radio("Map layer",["Snapshot (time)","Aggregate: max","Aggregate: mean"])
     opacity=st.slider("Overlay opacity",0.3,1.0,0.85)
+    show_anch=st.checkbox(f"Anchorage areas ({len(ANCH)})",value=True) if ANCH else False
 
 if not loaded:
     st.title("MPA Current Time-Series")
@@ -167,6 +178,11 @@ with left:
     m=folium.Map(location=[(sw[0]+ne[0])/2,(sw[1]+ne[1])/2],zoom_start=11 if len(loaded)>1 else 12,tiles=url,attr=attr)
     for ov,bnd in overlays:
         folium.raster_layers.ImageOverlay(R.png_data_uri(ov),bounds=[bnd["sw"],bnd["ne"]],opacity=opacity).add_to(m)
+    if show_anch:
+        for a in ANCH:
+            folium.Polygon([tuple(p) for p in a["poly"]],color="#2b2c7c",weight=1.4,
+                           fill=True,fill_color="#3b3bbf",fill_opacity=0.05,
+                           tooltip=f"{a['name']} · {a['code']}").add_to(m)
     if len(loaded)>1: m.fit_bounds([sw,ne])
     if "pt" in st.session_state: folium.Marker(st.session_state["pt"]).add_to(m)
     st.caption(cap)
