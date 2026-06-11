@@ -31,29 +31,33 @@ _KIOSK_HTML = """<!doctype html><html><head>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
- html,body{margin:0;height:100%;background:#eef1f3;font-family:system-ui,Arial,sans-serif}
- #map{position:absolute;inset:0}
- .ov{position:absolute;z-index:1000;background:rgba(255,255,255,.92);border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
- #clock{top:16px;left:16px;padding:10px 20px;font-size:34px;font-weight:700;color:#16324f}
- #title{top:16px;right:16px;padding:10px 18px;font-size:18px;color:#fff;background:rgba(22,50,79,.92)}
- #legend{bottom:16px;left:16px;padding:8px 12px;font-size:16px}
- #legend b{margin-right:6px}
- #legend span{padding:3px 9px;margin:2px;border-radius:4px;border:1px solid #cbd2d9;display:inline-block}
- #bar{position:absolute;bottom:0;left:0;height:6px;background:#2e8b57;z-index:1001;transition:width .25s linear}
+ html,body{margin:0;height:100%;background:#eef1f3;font-family:system-ui,Arial,sans-serif;overflow:hidden}
+ #top{position:absolute;top:0;left:0;right:0;height:58px;z-index:1000;display:flex;align-items:center;
+      gap:18px;padding:0 18px;background:rgba(22,50,79,.95);color:#fff;box-sizing:border-box}
+ #clock{font-size:30px;font-weight:700;white-space:nowrap}
+ #legend{flex:1;text-align:center;font-size:17px}
+ #legend b{margin-right:8px}
+ #legend span{padding:3px 10px;margin:2px;border-radius:4px;font-weight:600;display:inline-block}
+ #title{font-size:16px;opacity:.85;white-space:nowrap}
+ #map{position:absolute;top:58px;left:0;right:0;bottom:0}
+ #bar{position:absolute;bottom:0;left:0;height:5px;background:#2e8b57;z-index:1001;transition:width .25s linear}
 </style></head><body>
+<div id="top">
+ <span id="clock">--</span>
+ <span id="legend"><b>Speed (kn):</b> __LEGEND__</span>
+ <span id="title">SGP Currents &middot; live 7-day loop</span>
+</div>
 <div id="map"></div>
-<div id="clock" class="ov">--</div>
-<div id="title" class="ov">SGP Currents &middot; 7-day loop</div>
-<div id="legend" class="ov"><b>kn:</b> __LEGEND__</div>
 <div id="bar"></div>
 <script>
 var D=__PAYLOAD__;
 var BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 var map=L.map('map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,boxZoom:false,keyboard:false,touchZoom:false,tap:false});
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
-map.fitBounds([D.sw,D.ne]);
 var ssp=D.sspb?L.imageOverlay(BLANK,[D.sspb.sw,D.sspb.ne],{opacity:.92}).addTo(map):null;
 var eba=D.ebab?L.imageOverlay(BLANK,[D.ebab.sw,D.ebab.ne],{opacity:.92}).addTo(map):null;
+function fit(){map.invalidateSize();map.fitBounds([D.sw,D.ne],{padding:[28,28]});}
+fit();setTimeout(fit,400);setTimeout(fit,1200);window.addEventListener('resize',fit);
 var i=0,n=D.frames.length;
 function show(){var f=D.frames[i];
  if(ssp)ssp.setUrl(f.ssp||BLANK);
@@ -87,7 +91,11 @@ def _render_kiosk(qp):
     remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
     today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
     days_tuple=tuple((today+dt.timedelta(days=i)).strftime("%Y%m%d") for i in range(days))
-    st.markdown("<style>#MainMenu,header,footer{display:none!important}.block-container{padding:0!important;max-width:100%!important}</style>",unsafe_allow_html=True)
+    st.markdown("<style>#MainMenu,header,footer,[data-testid='stToolbar']{display:none!important}"
+                ".block-container{padding:0!important;max-width:100%!important}"
+                ".stApp{overflow:hidden}"
+                "iframe{height:100vh!important;width:100%!important;display:block;border:0}</style>",
+                unsafe_allow_html=True)   # force the map iframe to fill the actual TV viewport
     frames,sspb,ebab=_kiosk_frames(days_tuple,step,remote)
     if not frames: st.error("No data archived yet for the next 7 days."); return
     sws=[b["sw"] for b in (sspb,ebab) if b]; nes=[b["ne"] for b in (sspb,ebab) if b]
