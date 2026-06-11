@@ -101,6 +101,18 @@ def png_data_uri(im, max_w=None, optimize=False):
     b=io.BytesIO(); im.save(b,"PNG",optimize=optimize)
     return "data:image/png;base64,"+base64.b64encode(b.getvalue()).decode()
 
+def clip_lon(im, bounds, split, keep):
+    """Blank (make transparent) the half of an area overlay past `split` longitude, so SSP and
+    EBA tile without overlapping -> the shared band isn't double-plotted (denser/darker). bounds
+    = that area's {sw,ne}; keep='W' keeps west of split, 'E' keeps east."""
+    lon0=bounds["sw"][1]; lon1=bounds["ne"][1]
+    if not (min(lon0,lon1) < split < max(lon0,lon1)): return im   # split not within this overlay
+    col=int(round((split-lon0)/(lon1-lon0)*im.width)); col=max(0,min(im.width,col))
+    a=np.array(im.convert("RGBA"))
+    if keep=="W": a[:,col:,3]=0
+    else:         a[:,:col,3]=0
+    return Image.fromarray(a)
+
 def kiosk_uri(im, max_w=680, colors=32):
     """Tiny palette-PNG data URI for the TV loop: ~40KB vs ~700KB, per-pixel alpha preserved
     (basemap shows through empty cells), so hundreds of frames embed without bloating the page."""

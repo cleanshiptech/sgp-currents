@@ -26,6 +26,14 @@ def load_anchorages():
     except Exception: return []
 ANCH=load_anchorages()
 
+def _overlap():                                # split lon so SSP/EBA tile without double-plotting
+    bs=D.bounds("SSP"); be=D.bounds("EBA")
+    lo=max(bs["sw"][1],be["sw"][1]); hi=min(bs["ne"][1],be["ne"][1])
+    if lo>=hi: return None,None,None
+    ssp_w=(bs["sw"][1]+bs["ne"][1])/2 < (be["sw"][1]+be["ne"][1])/2
+    return (lo+hi)/2, ("W" if ssp_w else "E"), ("E" if ssp_w else "W")
+SPLIT,SSP_KEEP,EBA_KEEP=_overlap()
+
 def nearest_station(lat,lon):
     best=None
     for n,(la,lo) in STATIONS.items():
@@ -47,7 +55,10 @@ _KIOSK_HTML = """<!doctype html><html><head>
  #legend span{padding:3px 10px;margin:2px;border-radius:4px;font-weight:600;display:inline-block}
  #title{font-size:16px;opacity:.85;white-space:nowrap}
  #map{position:absolute;top:58px;left:0;right:0;bottom:0}
- .anchlbl{background:none!important;border:0!important;box-shadow:none!important;color:#1b1c66;font-weight:700;font-size:11px;text-shadow:0 0 3px #fff,0 0 3px #fff}
+ .anchlbl{background:none!important;border:0!important;box-shadow:none!important;color:#1b1c66;font-weight:700;font-size:10px;text-shadow:0 0 3px #fff,0 0 3px #fff}
+ #anchleg{position:absolute;bottom:14px;right:14px;z-index:1000;background:rgba(255,255,255,.92);padding:8px 12px;border-radius:8px;font-size:11px;line-height:1.3;color:#1b1c66;max-height:88vh;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+ #anchleg b{display:inline-block;width:20px;text-align:right;margin-right:6px}
+ #anchleg .h{font-weight:700;margin-bottom:3px;border-bottom:1px solid #ccd;padding-bottom:2px}
  #bar{position:absolute;bottom:0;left:0;height:5px;background:#2e8b57;z-index:1001;transition:width .25s linear}
 </style></head><body>
 <div id="top">
@@ -57,6 +68,7 @@ _KIOSK_HTML = """<!doctype html><html><head>
 </div>
 <div id="map"></div>
 <div id="bar"></div>
+<div id="anchleg"><div class="h">Anchorages</div>__ANCHLEG__</div>
 <script>
 var D=__PAYLOAD__;
 var BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
@@ -64,8 +76,8 @@ var map=L.map('map',{zoomControl:false,attributionControl:false,dragging:false,s
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
 var ssp=D.sspb?L.imageOverlay(BLANK,[D.sspb.sw,D.sspb.ne],{opacity:.92}).addTo(map):null;
 var eba=D.ebab?L.imageOverlay(BLANK,[D.ebab.sw,D.ebab.ne],{opacity:.92}).addTo(map):null;
-(D.anch||[]).forEach(function(a){L.polygon(a.poly,{color:'#1b1c66',weight:1.3,fill:false,opacity:.6})
- .addTo(map).bindTooltip(a.code,{permanent:true,direction:'center',className:'anchlbl'});});
+(D.anch||[]).forEach(function(a,i){L.polygon(a.poly,{color:'#1b1c66',weight:1.2,fill:false,opacity:.55})
+ .addTo(map).bindTooltip(String(i+1),{permanent:true,direction:'center',className:'anchlbl'});});
 function fit(){map.invalidateSize();map.fitBounds([D.sw,D.ne],{padding:[28,28]});}
 fit();setTimeout(fit,400);setTimeout(fit,1200);window.addEventListener('resize',fit);
 var i=0,n=D.frames.length;
@@ -89,8 +101,12 @@ def _kiosk_frames(days_tuple, step, remote):
         if dssp: sspb=dssp["bounds"]
         if deba: ebab=deba["bounds"]
         for ti in sorted(set(hs)|set(he))[::step]:
-            su=R.kiosk_uri(R.gridded_frame_overlay(hs,ti)) if ti in hs else None
-            eu=R.kiosk_uri(R.gridded_frame_overlay(he,ti)) if ti in he else None
+            osp=R.gridded_frame_overlay(hs,ti) if ti in hs else None
+            oeb=R.gridded_frame_overlay(he,ti) if ti in he else None
+            if SPLIT and osp is not None: osp=R.clip_lon(osp,D.bounds("SSP"),SPLIT,SSP_KEEP)
+            if SPLIT and oeb is not None: oeb=R.clip_lon(oeb,D.bounds("EBA"),SPLIT,EBA_KEEP)
+            su=R.kiosk_uri(osp) if osp is not None else None
+            eu=R.kiosk_uri(oeb) if oeb is not None else None
             if su or eu:
                 out.append({"label":f"{dt.datetime.strptime(ds,'%Y%m%d'):%a %d %b}  {ti[:2]}:{ti[2:]}","ssp":su,"eba":eu})
     return out,sspb,ebab
@@ -113,7 +129,9 @@ def _render_kiosk(qp):
     def _txt(rgb): return "#111" if (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])>150 else "#fff"
     legend="".join(f"<span style='background:rgb{ex.DISPLAY_BANDS[i][1]};color:{_txt(ex.DISPLAY_BANDS[i][1])}'>{ex.DISPLAY_LABELS[i]}</span>" for i in range(6))
     payload=json.dumps({"frames":frames,"sspb":sspb,"ebab":ebab,"sw":sw,"ne":ne,"fps":fps,"anch":ANCH})
-    _html(_KIOSK_HTML.replace("__PAYLOAD__",payload).replace("__LEGEND__",legend),height=H,scrolling=False)
+    anchleg="".join(f"<div><b>{i+1}</b>{a['name'].replace(' Anchorage','')}</div>" for i,a in enumerate(ANCH))
+    _html(_KIOSK_HTML.replace("__PAYLOAD__",payload).replace("__LEGEND__",legend).replace("__ANCHLEG__",anchleg),
+          height=H,scrolling=False)
 
 def _qp():
     try: return {k:(v[-1] if isinstance(v,list) else v) for k,v in dict(st.query_params).items()}
@@ -284,24 +302,29 @@ left,right=st.columns([3,2])
 with left:
     if view=="Snapshot (time)":
         ti=st.select_slider("Time (SGT)",times,value=times[len(times)//2])
-        overlays=[(R.gridded_frame_overlay(dd["frames"],ti),dd["bounds"]) for _,dd in loaded if ti in dd["frames"]]
+        overlays=[(a,R.gridded_frame_overlay(dd["frames"],ti),dd["bounds"]) for a,dd in loaded if ti in dd["frames"]]
         cap=f"{area} {day} {ti} · {tcount(ti)} arrows"
         if daymax and tcount(ti)<0.25*daymax:
             st.info("⚓ **Slack water** — currents near zero, so most cells are calm (≤0.5 kn) with no direction. Slide to a flood/ebb time for the working current.")
     else:
         stat="max" if "max" in view else "mean"
-        overlays=[(R.aggregate_overlay(dd["frames"],stat),dd["bounds"]) for _,dd in loaded]
+        overlays=[(a,R.aggregate_overlay(dd["frames"],stat),dd["bounds"]) for a,dd in loaded]
         cap=f"{area} {day} · {stat} over day"
     url,attr=TILES[basemap]
     m=folium.Map(location=[(sw[0]+ne[0])/2,(sw[1]+ne[1])/2],zoom_start=11 if len(loaded)>1 else 12,tiles=url,attr=attr)
-    for ov,bnd in overlays:
+    for a,ov,bnd in overlays:
+        if SPLIT: ov=R.clip_lon(ov,bnd,SPLIT, SSP_KEEP if a=="SSP" else EBA_KEEP)
         folium.raster_layers.ImageOverlay(R.png_data_uri(ov),bounds=[bnd["sw"],bnd["ne"]],opacity=opacity).add_to(m)
     if show_anch:
         for a in ANCH:
             folium.Polygon([tuple(p) for p in a["poly"]],color="#2b2c7c",weight=1.4,
                            fill=True,fill_color="#3b3bbf",fill_opacity=0.05,
                            tooltip=f"{a['name']} · {a['code']}").add_to(m)
-    if len(loaded)>1: m.fit_bounds([sw,ne])
+    nodes=[n for _,dd in loaded for n in R.canonical_nodes(dd["frames"])]   # fit to the data extent (closer)
+    if nodes:
+        la=[n[2] for n in nodes]; lo2=[n[3] for n in nodes]; pad=0.012
+        m.fit_bounds([[min(la)-pad,min(lo2)-pad],[max(la)+pad,max(lo2)+pad]])
+    elif len(loaded)>1: m.fit_bounds([sw,ne])
     if "pt" in st.session_state: folium.Marker(st.session_state["pt"]).add_to(m)
     st.caption(cap)
     ev=st_folium(m,height=470,use_container_width=True,returned_objects=["last_clicked"])
