@@ -28,8 +28,7 @@ def _header(fig, h=0.065, title="Anchorage Current Forecast", tsize=17):
 
 def _footer(fig):
     sgt=dt.datetime.utcnow()+dt.timedelta(hours=8)
-    fig.text(0.035,0.022,"Source: MPA Tidal Atlas (digitised) · anchorage limits per MPA (Port) Regulations, 2nd Schedule.  "
-             "Planning aid — not for navigation.",fontsize=6.5,color="#8a8a8a")
+    fig.text(0.035,0.022,"Planning aid — not for navigation.",fontsize=6.5,color="#8a8a8a")
     fig.text(0.965,0.022,f"Generated {sgt:%Y-%m-%d %H:%M} SGT · c-leanship.com",fontsize=6.5,color="#8a8a8a",ha="right")
 
 def _build_figs(eta, win, thr, am_label, rows, series, steps, nmap, approx, rec_h):
