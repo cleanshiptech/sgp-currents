@@ -5,7 +5,7 @@ import os, math, json, datetime as dt
 import numpy as np, pandas as pd, streamlit as st
 import altair as alt, folium
 from streamlit_folium import st_folium
-import extractor as ex, render as R, data as D, grid as G
+import extractor as ex, render as R, data as D, grid as G, report
 
 st.set_page_config(page_title="MPA Current Time-Series", layout="wide")
 STATIONS={"SSP-A":(1.1963,103.6815),"SSP-B":(1.1893,103.6934),"SSP-C":(1.1818,103.7032),
@@ -196,7 +196,7 @@ def plan_series(eta_iso, hours, aggmode, remote):
             series[code].append(round(float(np.mean(sp) if aggmode=="mean" else max(sp)),3) if sp else None)
     return series,[s.isoformat() for s in steps],approx
 
-def _render_planner(eta_d, eta_h, win, thr, aggmode, remote):
+def _render_planner(eta_d, eta_h, win, thr, aggmode, rec_h, remote):
     st.subheader("⚓ Anchorage planner")
     if not ANCH: st.error("No anchorage data loaded."); return
     eta=dt.datetime.combine(eta_d,dt.time(int(eta_h)))
@@ -213,35 +213,39 @@ def _render_planner(eta_d, eta_h, win, thr, aggmode, remote):
         hrs=0.5*sum(1 for v in av if v<thr); mean=sum(av)/len(av)
         rows.append((hrs,mean,max(av),code))
     rows.sort(key=lambda r:(-r[0],r[1],r[2]))   # most hours below thr, then calmest mean, then lowest peak
-    allcalm=rows and all(abs(h-win)<1e-6 for h,*_ in rows)
-    st.caption(f"ETA **{eta:%a %d %b %Y %H:%M}** SGT → **{win} h**. Ranked by hours the **{aggmode}** current "
-               f"stays below **{thr:.1f} kn**, ties broken by lowest mean.  ~ = nearest-cell estimate (anchorage < grid).")
-    if rows:
+    top=[c for h,mn,pk,c in rows if h>=rec_h]
+    st.caption(f"ETA **{eta:%a %d %b %Y %H:%M}** SGT → **{win} h** · threshold **{thr:.1f} kn** · {aggmode} per anchorage. "
+               f"Ranked by hours below threshold (ties: lowest mean).  ~ = nearest-cell estimate.")
+    if top:
+        st.success("✅ **Recommended ({n})** — ≥ {r:.0f} h below {t:.1f} kn:  ".format(n=len(top),r=rec_h,t=thr)
+                   + " · ".join(f"**{nmap[c]}**" for c in top[:6]) + (f"  +{len(top)-6} more" if len(top)>6 else ""))
+    elif rows:
         h0,mn0,pk0,c0=rows[0]
-        if allcalm:
-            st.info(f"🟢 **Calm window** — every anchorage stays below {thr:.1f} kn for the whole {win} h "
-                    f"(it's a neap/slack period). Ranked by lowest mean current; calmest: **{nmap[c0]}** "
-                    f"({c0}) — mean {mn0:.2f} kn, peak {pk0:.2f} kn.")
-        else:
-            st.success(f"Most attractive: **{nmap[c0]}** ({c0}) — **{h0:.1f} h** ({h0/win:.0%}) below "
-                       f"{thr:.1f} kn, mean {mn0:.2f}, peak {pk0:.2f} kn.")
-    df=pd.DataFrame([{"#":i+1,"Anchorage":nmap[c]+(" ~" if approx.get(c) else ""),"Code":c,
+        st.warning(f"No anchorage stays below {thr:.1f} kn for ≥ {rec_h:.0f} h this window. "
+                   f"Best: **{nmap[c0]}** — {h0:.1f} h, peak {pk0:.2f} kn.")
+    pdf=report.build_pdf(eta,int(win),thr,aggmode,rows,series,steps,nmap,approx,rec_h)
+    cdl,ccsv=st.columns(2)
+    cdl.download_button("📄 Download PDF report",pdf,f"anchorage_forecast_{eta:%Y%m%d_%H%M}.pdf",
+                        "application/pdf",use_container_width=True)
+    df=pd.DataFrame([{"#":i+1,"Rec":"✓" if c in top else "","Anchorage":nmap[c]+(" ~" if approx.get(c) else ""),"Code":c,
                       f"Hrs <{thr:.1f}":round(h,1),"% win":round(100*h/win),"Mean kn":round(mn,2),"Peak kn":round(pk,2)}
                      for i,(h,mn,pk,c) in enumerate(rows)])
+    ccsv.download_button("Download ranking (CSV)",df.to_csv(index=False).encode(),
+                         f"anchorage_plan_{eta:%Y%m%d_%H%M}.csv","text/csv",use_container_width=True)
     st.dataframe(df,hide_index=True,use_container_width=True)
-    st.download_button("Download ranking (CSV)",df.to_csv(index=False).encode(),
-                       f"anchorage_plan_{eta:%Y%m%d_%H%M}.csv","text/csv")
-    long=[{"Anchorage":nmap[c],"t":t,"kn":v} for c,s in series.items() for t,v in zip(steps,s) if v is not None]
+    def _bnd(v): return ex.DISPLAY_LABELS[min(5,int(v//0.5))]
+    long=[{"Anchorage":("★ " if c in top else "")+nmap[c],"t":t,"kn":round(v,2),"band":_bnd(v)}
+          for c,s in series.items() for t,v in zip(steps,s) if v is not None]
     if long:
-        L=pd.DataFrame(long); order=[nmap[c] for *_,c in rows]
-        hi=max(thr*1.5, math.ceil(L["kn"].max()))   # adapt upper bound so calm days still show variation
+        L=pd.DataFrame(long); order=[("★ " if c in top else "")+nmap[c] for *_,c in rows]
+        labels=list(ex.DISPLAY_LABELS); cols=[f"rgb{ex.DISPLAY_BANDS[i][1]}" for i in range(6)]
         hm=alt.Chart(L).mark_rect().encode(
             x=alt.X("t:T",title="SGT (window from ETA)"),
             y=alt.Y("Anchorage:N",sort=order,title=None),
-            color=alt.Color("kn:Q",title="kn",scale=alt.Scale(domain=[0,thr,hi],range=["#2c7bb6","#ffffbf","#d7191c"])),
+            color=alt.Color("band:N",scale=alt.Scale(domain=labels,range=cols),sort=labels,title="Speed (kn)"),
             tooltip=[alt.Tooltip("Anchorage:N"),alt.Tooltip("t:T",format="%a %H:%M"),alt.Tooltip("kn:Q")]
         ).properties(height=max(220,18*len(rows)))
-        st.caption(f"Blue = calm, yellow ≈ {thr:.1f} kn, red = above. Each row is an anchorage; left→right is the window from ETA.")
+        st.caption("★ = recommended. Colours match the map's speed bands; left→right is the window from ETA.")
         st.altair_chart(hm,use_container_width=True)
 
 with st.sidebar:
@@ -258,7 +262,9 @@ with st.sidebar:
         eta_h=st.slider("ETA hour (SGT)",0,23,0)
         win=st.select_slider("Window (hours)",[24,48,72],value=48)
         thr=st.slider("Calm threshold (kn)",0.5,3.0,1.5,0.5)
-        aggmode=st.radio("Per-anchorage current",["typical (mean)","worst-case (max)"])
+        rec_h=st.slider("Recommend if ≥ h below threshold",6,int(win),min(24,int(win)),6)
+        aggmode=st.radio("Per-anchorage current",["worst-case (max)","typical (mean)"],
+                         help="Worst-case = strongest current anywhere in the anchorage (conservative). Typical = mean.")
     else:
         area="SSP + EBA"; sel_areas=["SSP","EBA"]   # combined view only
         date=st.date_input("Date",sgt_today,
@@ -279,7 +285,7 @@ with st.sidebar:
         show_anch=st.checkbox(f"Anchorage areas ({len(ANCH)})",value=True) if ANCH else False
 
 if mode=="Anchorage planner":
-    _render_planner(eta_d,eta_h,win,thr,aggmode,remote); st.stop()
+    _render_planner(eta_d,eta_h,win,thr,aggmode,rec_h,remote); st.stop()
 
 if not loaded:
     st.title("MPA Current Time-Series")
