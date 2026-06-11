@@ -234,13 +234,14 @@ def _render_planner(eta_d, eta_h, win, thr, aggmode, rec_h, remote):
                          f"anchorage_plan_{eta:%Y%m%d_%H%M}.csv","text/csv",use_container_width=True)
     st.dataframe(df,hide_index=True,use_container_width=True)
     def _bnd(v): return ex.DISPLAY_LABELS[min(5,int(v//0.5))]
-    long=[{"Anchorage":("★ " if c in top else "")+nmap[c],"t":t,"kn":round(v,2),"band":_bnd(v)}
+    half=dt.timedelta(minutes=30)
+    long=[{"Anchorage":("★ " if c in top else "")+nmap[c],"t":t,"t2":t+half,"kn":round(v,2),"band":_bnd(v)}
           for c,s in series.items() for t,v in zip(steps,s) if v is not None]
     if long:
         L=pd.DataFrame(long); order=[("★ " if c in top else "")+nmap[c] for *_,c in rows]
         labels=list(ex.DISPLAY_LABELS); cols=[f"rgb{ex.DISPLAY_BANDS[i][1]}" for i in range(6)]
         hm=alt.Chart(L).mark_rect().encode(
-            x=alt.X("t:T",title="SGT (window from ETA)"),
+            x=alt.X("t:T",title="SGT (window from ETA)"), x2="t2:T",   # explicit cell width -> no aggregation
             y=alt.Y("Anchorage:N",sort=order,title=None),
             color=alt.Color("band:N",scale=alt.Scale(domain=labels,range=cols),sort=labels,title="Speed (kn)"),
             tooltip=[alt.Tooltip("Anchorage:N"),alt.Tooltip("t:T",format="%a %H:%M"),alt.Tooltip("kn:Q")]
