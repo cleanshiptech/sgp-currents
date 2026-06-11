@@ -75,15 +75,15 @@ def _kiosk_frames(days_tuple, step, remote):
         if dssp: sspb=dssp["bounds"]
         if deba: ebab=deba["bounds"]
         for ti in sorted(set(hs)|set(he))[::step]:
-            su=R.kiosk_uri(R.frame_overlay(hs[ti])) if ti in hs else None
-            eu=R.kiosk_uri(R.frame_overlay(he[ti])) if ti in he else None
+            su=R.kiosk_uri(R.gridded_frame_overlay(hs,ti)) if ti in hs else None
+            eu=R.kiosk_uri(R.gridded_frame_overlay(he,ti)) if ti in he else None
             if su or eu:
                 out.append({"label":f"{dt.datetime.strptime(ds,'%Y%m%d'):%a %d %b}  {ti[:2]}:{ti[2:]}","ssp":su,"eba":eu})
     return out,sspb,ebab
 
 def _render_kiosk(qp):
     from streamlit.components.v1 import html as _html
-    days=int(qp.get("days",7)); step=int(qp.get("step",2)); fps=float(qp.get("fps",4)); H=int(qp.get("h",1040))
+    days=int(qp.get("days",7)); step=int(qp.get("step",2)); fps=float(qp.get("fps",2)); H=int(qp.get("h",1040))
     remote=st.secrets.get("DATA_BASE","") if hasattr(st,"secrets") else ""
     today=(dt.datetime.utcnow()+dt.timedelta(hours=8)).date()
     days_tuple=tuple((today+dt.timedelta(days=i)).strftime("%Y%m%d") for i in range(days))
