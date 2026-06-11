@@ -192,30 +192,38 @@ def _render_planner(eta_d, eta_h, win, thr, aggmode, remote):
     for code,s in series.items():
         av=[v for v in s if v is not None]
         if not av: continue
-        hrs=0.5*sum(1 for v in av if v<thr)
-        rows.append((hrs,max(av),code))
-    rows.sort(key=lambda r:(-r[0],r[1]))
-    st.caption(f"ETA **{eta:%a %d %b %Y %H:%M}** SGT → **{win} h** window. Ranked by hours the "
-               f"**{aggmode}** current stays below **{thr:.1f} kn**.  ~ = anchorage smaller than the grid (nearest-cell estimate).")
+        hrs=0.5*sum(1 for v in av if v<thr); mean=sum(av)/len(av)
+        rows.append((hrs,mean,max(av),code))
+    rows.sort(key=lambda r:(-r[0],r[1],r[2]))   # most hours below thr, then calmest mean, then lowest peak
+    allcalm=rows and all(abs(h-win)<1e-6 for h,*_ in rows)
+    st.caption(f"ETA **{eta:%a %d %b %Y %H:%M}** SGT → **{win} h**. Ranked by hours the **{aggmode}** current "
+               f"stays below **{thr:.1f} kn**, ties broken by lowest mean.  ~ = nearest-cell estimate (anchorage < grid).")
     if rows:
-        h0,pk0,c0=rows[0]
-        st.success(f"Most attractive: **{nmap[c0]}** ({c0}) — **{h0:.1f} h** ({h0/win:.0%}) below {thr:.1f} kn, peak {pk0:.2f} kn.")
+        h0,mn0,pk0,c0=rows[0]
+        if allcalm:
+            st.info(f"🟢 **Calm window** — every anchorage stays below {thr:.1f} kn for the whole {win} h "
+                    f"(it's a neap/slack period). Ranked by lowest mean current; calmest: **{nmap[c0]}** "
+                    f"({c0}) — mean {mn0:.2f} kn, peak {pk0:.2f} kn.")
+        else:
+            st.success(f"Most attractive: **{nmap[c0]}** ({c0}) — **{h0:.1f} h** ({h0/win:.0%}) below "
+                       f"{thr:.1f} kn, mean {mn0:.2f}, peak {pk0:.2f} kn.")
     df=pd.DataFrame([{"#":i+1,"Anchorage":nmap[c]+(" ~" if approx.get(c) else ""),"Code":c,
-                      f"Hrs <{thr:.1f}kn":round(h,1),"% of window":round(100*h/win),"Peak kn":round(pk,2)}
-                     for i,(h,pk,c) in enumerate(rows)])
+                      f"Hrs <{thr:.1f}":round(h,1),"% win":round(100*h/win),"Mean kn":round(mn,2),"Peak kn":round(pk,2)}
+                     for i,(h,mn,pk,c) in enumerate(rows)])
     st.dataframe(df,hide_index=True,use_container_width=True)
     st.download_button("Download ranking (CSV)",df.to_csv(index=False).encode(),
                        f"anchorage_plan_{eta:%Y%m%d_%H%M}.csv","text/csv")
     long=[{"Anchorage":nmap[c],"t":t,"kn":v} for c,s in series.items() for t,v in zip(steps,s) if v is not None]
     if long:
         L=pd.DataFrame(long); order=[nmap[c] for *_,c in rows]
+        hi=max(thr*1.5, math.ceil(L["kn"].max()))   # adapt upper bound so calm days still show variation
         hm=alt.Chart(L).mark_rect().encode(
-            x=alt.X("t:T",title="SGT (48h from ETA)"),
+            x=alt.X("t:T",title="SGT (window from ETA)"),
             y=alt.Y("Anchorage:N",sort=order,title=None),
-            color=alt.Color("kn:Q",title="kn",scale=alt.Scale(domain=[0,thr,3.0],range=["#2c7bb6","#ffffbf","#d7191c"])),
+            color=alt.Color("kn:Q",title="kn",scale=alt.Scale(domain=[0,thr,hi],range=["#2c7bb6","#ffffbf","#d7191c"])),
             tooltip=[alt.Tooltip("Anchorage:N"),alt.Tooltip("t:T",format="%a %H:%M"),alt.Tooltip("kn:Q")]
         ).properties(height=max(220,18*len(rows)))
-        st.caption("Blue = calm, red = above threshold. Each row is an anchorage; left→right is the 48h from ETA.")
+        st.caption(f"Blue = calm, yellow ≈ {thr:.1f} kn, red = above. Each row is an anchorage; left→right is the window from ETA.")
         st.altair_chart(hm,use_container_width=True)
 
 with st.sidebar:
